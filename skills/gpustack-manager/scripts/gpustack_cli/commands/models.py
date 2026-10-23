@@ -56,11 +56,15 @@ def cmd_models_list(cfg: Config, args: argparse.Namespace) -> int:
     print_table(["ID", "名称", "副本(ready/total)", "后端", "来源", "状态"], rows)
     if rows:
         print(f"\n共 {len(rows)} 个模型。")
+    elif cfg.username:
+        # 会话能看到全量，空就是真的空，别再误导成权限问题
+        print("提示：该实例当前没有模型。")
     else:
-        # 列表按 principal 归属过滤：多用户实例上用非 owner 的 key 会全空，集群聚合却仍有数据
+        # API key 的列表按 principal 归属过滤：非 owner 的 key 会全空而集群聚合仍有数据
         print(
-            "提示：/v2/models 按 principal 归属过滤。若集群确实有模型，用 "
-            "`dashboard --cluster-id <id>` 看聚合计数、`my-models` 看当前 key 能调用的模型入口。"
+            "提示：API key 的 /v2/models 按 principal 归属过滤，可能看不到别人的模型。"
+            "改用 `--username/--password` 账号密码登录可见全量；或临时用 "
+            "`dashboard --cluster-id <id>` / `my-models` 交叉验证。"
         )
     return EXIT_OK
 
