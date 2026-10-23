@@ -1,0 +1,57 @@
+name: Validate skills
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # SKILL.md frontmatter 是 skills.sh 加载技能的唯一入口，字段缺失会静默不显示
+      - name: 校验 SKILL.md frontmatter
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          REQUIRED = ("name", "description")
+          errors = []
+          for f in sorted(pathlib.Path("skills").glob("*/SKILL.md")):
+              text = f.read_text(encoding="utf-8")
+              m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+              if not m:
+                  errors.append(f"{f}: 缺少 YAML frontmatter")
+                  continue
+              fm = m.group(1)
+              for key in REQUIRED:
+                  if not re.search(rf"^{key}:", fm, re.M):
+                      errors.append(f"{f}: frontmatter 缺少 {key}")
+              name = re.search(r"^name:\s*(\S+)", fm, re.M)
+              if name and name.group(1) != f.parent.name:
+                  errors.append(f"{f}: name={name.group(1)} 与目录名 {f.parent.name} 不一致")
+              if len(text.splitlines()) < 60:
+                  errors.append(f"{f}: 正文过短（<60 行），疑似占位")
+
+          if errors:
+              print("\n".join(errors))
+              sys.exit(1)
+          print("skills OK")
+          PY
+
+      # CLI 必须保持仅标准库，否则安装方还要装依赖
+      - name: 校验脚本仅用标准库
+        run: |
+          python3 -m py_compile scripts/gpustack.py
+          if grep -nE '^\s*(import|from)\s+(requests|httpx|yaml|click|rich)\b' scripts/gpustack.py; then
+            echo "scripts/gpustack.py 引入了第三方依赖"; exit 1
+          fi
+          python3 scripts/gpustack.py --help > /dev/null
+          echo "cli OK"

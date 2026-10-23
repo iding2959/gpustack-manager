@@ -1,0 +1,11 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "gpustack",
+      "description": "GPUStack 集群管理技能：模型部署/启停/扩缩容、实例日志排障、worker 维护、GPU 资源查询、OpenAI 兼容推理冒烟",
+      "skills": ["gpustack-manager", "gpustack-manager-en"]
+    }
+  ]
+}

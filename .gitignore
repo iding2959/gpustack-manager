@@ -1,0 +1,12 @@
+# 内部规划与协作文件：不入库
+task_plan.md
+findings.md
+progress.md
+docs/DESIGN-CONTRACT.md
+/tmp/
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
+.DS_Store
