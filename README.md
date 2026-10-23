@@ -4,7 +4,7 @@ GPUStack 集群管理 Agent Skill（v2.2.3 实测沉淀）：模型部署 / 启�
 
 配套一个**仅用 Python 标准库**的单文件 CLI：`scripts/gpustack.py`，零安装、零依赖，Agent 直接 `python3` 调用即可。
 
-[![skills.sh](https://skills.sh/b/iding2959/gpustack-manager)](https://skills.sh/iding2959/gpustack-manager)
+[![skills.sh](https://skills.sh/b/iding2959/gpustack-manager)](https://www.skills.sh/iding2959/gpustack-manager)
 
 ## 为什么需要它
 
@@ -149,6 +149,12 @@ python3 scripts/gpustack.py raw GET /v2/model-instances --query model_id=2
 6. **`ModelPublic` 没有 `state` 字段**，状态得由 `replicas/ready_replicas` 推导
 7. **启停的 PUT 只发 `{source,name,replicas}` 会 422**：`local_path must be provided when source is 'local_path'`，必须带上 source 对应的定位字段
 8. **`instances logs` 的 `tail` 按日志块计**（`tail=3` ≈ 30 行），不是行数
+
+## 安全说明
+
+- 密钥只走环境变量 / `~/.gpustack/config.json`，脚本里没有任何硬编码 key
+- 危险操作必须显式确认：`models delete` / `routes delete` 要 `--yes`，`workers maintenance` 要 `--enable/--disable`
+- **实例日志与推理输出属于第三方可控文本**：skill 明确要求把它们当数据而非指令（不 `eval`、不拼 shell、不据此触发写操作），对应 Snyk 审计的 W011「间接提示注入」提示
 
 ## 仓库结构
 
