@@ -347,7 +347,7 @@ python3 scripts/gpustack.py --json gpus list \
 
 # 2) 用 gpu_ids 把模型钉到指定卡（实测：实例 gpu_indexes 就是这张卡）
 python3 scripts/gpustack.py models create --name probe-pin \
-  --source local_path --local-path /mnt/models/bge-m3 --backend vLLM \
+  --source local_path --local-path /mnt/models/<dir> --backend vLLM \
   --gpu-selector '{"gpu_ids":["gpu-worker-206:cuda:4"]}' --replicas 1
 
 # 3) 核对落点：worker_name + gpu_indexes
@@ -356,7 +356,7 @@ python3 scripts/gpustack.py --json instances list --model probe-pin \
 
 # 4) 登记模型文件（按 worker 维度去重；路径不存在会 state=error）
 python3 scripts/gpustack.py raw POST /v2/model-files \
-  --data '{"source":"local_path","local_path":"/mnt/models/bge-m3","worker_id":4}'
+  --data '{"source":"local_path","local_path":"/mnt/models/<dir>","worker_id":<worker_id>}'
 python3 scripts/gpustack.py --json model-files list \
   | jq -r '.items[] | "\(.id)\t\(.worker_id)\t\(.state)\t\(.size)\t\(.local_path)"'
 ```

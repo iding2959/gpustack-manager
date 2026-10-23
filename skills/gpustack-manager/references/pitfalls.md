@@ -173,7 +173,7 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 ### 5.25 模型文件登记的唯一键与失败态
 
-`POST /v2/model-files` 的 `(local_path, worker_id)` 是唯一键：同路径同 worker → `409 AlreadyExists`；同路径换 worker → 允许；目标 worker 上路径不存在 → `state=error`、`state_message="Path does not exist: /mnt/models/xxx"`；成功 → `state=ready` 且自动回填 `size`（例：/mnt/models/bge-m3 = 4587311867 字节）。`[实测]`
+`POST /v2/model-files` 的 `(local_path, worker_id)` 是唯一键：同路径同 worker → `409 AlreadyExists`；同路径换 worker → 允许；目标 worker 上路径不存在 → `state=error`、`state_message="Path does not exist: /mnt/models/xxx"`；成功 → `state=ready` 且自动回填 `size`（成功后会回填 `size`，单位字节）。`[实测]`
 
 ### 5.26 指定卡部署的写法与核对
 
