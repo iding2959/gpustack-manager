@@ -4,7 +4,7 @@ description: "GPUStack v2.2.x 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.6"
+  version: "0.1.7"
   language: zh
 ---
 
@@ -131,8 +131,8 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `dashboard [--cluster-id N]` | 资源计数 + CPU/内存/GPU/显存当前负载；**多集群实例必须给 `--cluster-id`**，否则服务端按「当前集群」返回全 0 | `dashboard --cluster-id 1` |
 | `my-models` | 当前 key 能看到/能调用的模型入口（`/v2/my-models`，`targets`/`ready_targets`）；`/v2/models` 被归属过滤时用它看真实部署面 | `my-models` |
 | `usage summary [--start-date D] [--end-date D]` | 用量汇总；缺省取最近 30 天 | 见 4.8 |
-| `api-keys list` | key 清单（只给 `masked_value`，不回显明文） | `api-keys list` |
-| `benchmarks list` | 压测任务 | `benchmarks list` |
+| `api-keys list/get/create/delete` | key 清单与详情（只给 `masked_value`）；create 的**明文只返回一次**，delete 需 `--yes`（删完调用方立刻 401） | `api-keys create --name ci --scope inference --expires-in 86400` |
+| `benchmarks list/get/logs/create/state/delete` | 压测任务；**create 会真的打流量**，需已有实例名；`state --state stopped` 停止（需 `--yes`） | `benchmarks create --name b1 --model-instance-name <实例名> --dry-run` |
 | `backends list` | 推理后端与版本（`backend_name` / `default_version`） | `backends list` |
 | `routes list` / `routes get <name\|id>` | 模型路由；`/v1` 推理的前置条件（见 4.7） | `routes list` |
 | `routes create --name N --model <name\|id> [--weight W] [--dry-run]` | 建路由（把模型暴露到 `/v1`） | 见 4.7 |

@@ -8,6 +8,8 @@ import argparse
 from typing import List, Sequence
 
 from .commands import (
+    api_keys,
+    benchmarks,
     inference,
     instances,
     model_files,
@@ -151,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     models.register(subparsers, common)
     instances.register(subparsers, common)
     workers.register(subparsers, common)
+    api_keys.register(subparsers, common)
+    benchmarks.register(subparsers, common)
     model_files.register(subparsers, common)
     resources.register(subparsers, common)
     routes.register(subparsers, common)

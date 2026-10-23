@@ -141,10 +141,10 @@ python3 skills/gpustack-manager/scripts/gpustack.py raw GET /v2/model-instances 
 | `clusters list/get` | 集群 |
 | `dashboard` | 资源统计与当前负载 |
 | `usage summary` | 用量（必须带 `--start-date/--end-date`） |
-| `api-keys list` | API key（值不回显） |
+| `api-keys list/get/create/delete` | API key 管理（create 明文只回显一次，delete 需 `--yes`） |
 | `backends list` | 推理后端与默认版本 |
 | `routes list/get/create/delete` | 模型路由（**/v1 推理的前提**，delete 需 `--yes`） |
-| `benchmarks list` | 压测任务 |
+| `benchmarks list/get/logs/create/state/delete` | 压测任务（create 会真实打流量，stop/delete 需 `--yes`） |
 | `chat` / `embeddings` | OpenAI 兼容接口冒烟 |
 | `raw` | 任意方法/路径逃生口 |
 

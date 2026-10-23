@@ -198,29 +198,6 @@ def cmd_usage_summary(cfg: Config, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_api_keys_list(cfg: Config, args: argparse.Namespace) -> int:
-    payload, items = fetch_list(cfg, "/v2/api-keys")
-    items = sort_items(items)
-    if args.json:
-        dump_json(json_list_payload(payload, items))
-        return EXIT_OK
-    rows = [
-        [
-            item.get("id"),
-            item.get("name"),
-            ",".join(item.get("scope") or []),
-            item.get("masked_value") or ("自定义 key" if item.get("is_custom") else "-"),
-            item.get("user_name"),
-            item.get("created_at"),
-        ]
-        for item in items
-    ]
-    print_table(["ID", "名称", "scope", "值", "用户", "创建时间"], rows)
-    if rows:
-        print(f"\n共 {len(rows)} 个 API key（值不回显，服务端只给 masked_value）。")
-    return EXIT_OK
-
-
 def cmd_backends_list(cfg: Config, args: argparse.Namespace) -> int:
     payload, items = fetch_list(cfg, "/v2/inference-backends")
     items = sort_items(items)
@@ -241,30 +218,6 @@ def cmd_backends_list(cfg: Config, args: argparse.Namespace) -> int:
     print_table(["ID", "后端", "默认版本", "内置", "状态", "描述"], rows)
     if rows:
         print("\n提示：models create --backend 传这里的后端显示名（如 vLLM / SGLang / MindIE / VoxBox）。")
-    return EXIT_OK
-
-
-def cmd_benchmarks_list(cfg: Config, args: argparse.Namespace) -> int:
-    payload, items = fetch_list(cfg, "/v2/benchmarks")
-    items = sort_items(items)
-    if args.json:
-        dump_json(json_list_payload(payload, items))
-        return EXIT_OK
-    rows = [
-        [
-            item.get("id"),
-            item.get("name"),
-            item.get("model_name"),
-            item.get("state"),
-            pct(item.get("progress")),
-            item.get("dataset_name"),
-            item.get("created_at"),
-        ]
-        for item in items
-    ]
-    print_table(["ID", "名称", "模型", "状态", "进度", "数据集", "创建时间"], rows)
-    if rows:
-        print(f"\n共 {len(rows)} 个压测任务。")
     return EXIT_OK
 
 
@@ -303,18 +256,6 @@ def register(subparsers: Any, common: argparse.ArgumentParser) -> None:
     p.add_argument("--start-date", dest="start_date", metavar="YYYY-MM-DD", help="起始日期")
     p.add_argument("--end-date", dest="end_date", metavar="YYYY-MM-DD", help="结束日期")
     p.set_defaults(func=cmd_usage_summary)
-
-    # api-keys
-    p_keys = add_sub(subparsers, "api-keys", "API 密钥", common)
-    keys_sub = p_keys.add_subparsers(dest="action", metavar="<操作>", required=True)
-    p = add_sub(keys_sub, "list", "列出 API key（值不回显）", common)
-    p.set_defaults(func=cmd_api_keys_list)
-
-    # benchmarks
-    p_bench = add_sub(subparsers, "benchmarks", "压测任务", common)
-    bench_sub = p_bench.add_subparsers(dest="action", metavar="<操作>", required=True)
-    p = add_sub(bench_sub, "list", "列出压测任务", common)
-    p.set_defaults(func=cmd_benchmarks_list)
 
     # backends
     p_backends = add_sub(subparsers, "backends", "推理后端配置", common)
