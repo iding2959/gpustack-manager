@@ -1,6 +1,6 @@
 """routes 子命令：模型路由。
 
-v2.2.3 的 /v1 推理必须建 route，否则 /v1/models 为空、chat 返回 404 Model not found；
+/v1 推理必须建 route（v2.2.x 实测），否则 /v1/models 为空、chat 返回 404 Model not found；
 route 公共 schema 只回 targets/ready_targets 计数，没有 target 明细接口。
 """
 
@@ -92,7 +92,7 @@ def cmd_routes_create(cfg: Config, args: argparse.Namespace) -> int:
         f"已创建模型路由 {result.get('name')} "
         f"(id={result.get('id')}, targets={count_of(result.get('targets'))})"
     )
-    print("提示：v2.2.3 的 /v1 推理要靠 route 才路由得到模型，建好后 /v1/models 才会出现该模型。")
+    print("提示：/v1 推理要靠 route 才路由得到模型（实测 v2.2.0/v2.2.1/v2.2.3 均如此），建好后 /v1/models 才会出现该模型。")
     return EXIT_OK
 
 
@@ -114,7 +114,7 @@ def cmd_routes_delete(cfg: Config, args: argparse.Namespace) -> int:
 def register(subparsers: Any, common: argparse.ArgumentParser) -> None:
     """注册 routes 命令组。"""
     # routes
-    p_routes = add_sub(subparsers, "routes", "模型路由（v2.2.3 的 /v1 推理必须建 route）", common)
+    p_routes = add_sub(subparsers, "routes", "模型路由（/v1 推理必须建 route）", common)
     routes_sub = p_routes.add_subparsers(dest="action", metavar="<操作>", required=True)
 
     p = add_sub(routes_sub, "list", "列出模型路由", common)

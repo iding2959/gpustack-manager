@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.3"
+  version: "0.1.4"
   language: zh
 ---
 
@@ -357,6 +357,34 @@ python3 scripts/gpustack.py --json model-files list \
   | jq -r '.items[] | "\(.id)\t\(.worker_id)\t\(.state)\t\(.size)\t\(.local_path)"'
 ```
 
+### 4.10 用「自定义后端」部署（bge / visual-embedding 等非 vLLM/SGLang）
+
+自定义后端不是 CLI 特例，就是 `--backend <backend_name> --backend-version <version>`，关键是**先把镜像找对、把卡选对**：
+
+```bash
+# 1) 看自定义后端定义了哪些版本、每个版本用哪个镜像
+python3 scripts/gpustack.py --json raw GET /v2/inference-backends | \
+  jq -r '.items[] | select(.backend_name|test("custom")) | "\(.id)\t\(.backend_name)\t\(.version_configs|keys|join(","))"'
+python3 scripts/gpustack.py raw GET /v2/inference-backends/12      # 看 version_configs: version -> image_name
+
+# 2) 确认目标 worker 上已有该镜像（自定义镜像通常不在公共 registry 里）
+#    实测：镜像只存在于跑着同类模型的 worker 上；换一台没镜像的 worker 会 Failed to pull image ... not found
+ssh <worker> "docker images | grep -E 'bge-m3|face-embedding|normal-embedding'"
+
+# 3) 钉到那台的某张空闲卡部署
+python3 scripts/gpustack.py models create --name probe-bge \
+  --source local_path --local-path /mnt/models/bge-m3 \
+  --backend bge-custom --backend-version bge-m3-v1.1.0 \
+  --gpu-selector '{"gpu_ids":["gpu-worker-207:cuda:3"]}' --replicas 1
+
+# 4) 核对：实例 running + gpu_indexes 是目标卡；再建 route 冒烟
+python3 scripts/gpustack.py --json instances list --model probe-bge | jq -r '.items[]|"\(.state)\t\(.worker_name)\t\(.gpu_indexes)"'
+python3 scripts/gpustack.py routes create --name probe-bge --model probe-bge
+python3 scripts/gpustack.py embeddings --model probe-bge --input "hello"
+```
+
+实测（v2.2.1）：`bge-custom` + `bge-m3-v1.1.0` 钉到 `gpu-worker-207:cuda:3`，30 秒 `running`，容器内日志 `Loading BGE-M3 model ... Model loaded successfully!`，embeddings 返回 **1024 维**（注意字段名是 `data[].dense`，不是 OpenAI 的 `data[].embedding`；CLI 已兼容两者）。
+
 模型文件规则（实测）：唯一键是 `(local_path, worker_id)`——同路径同 worker 重复登记回 **409 AlreadyExists**；路径在目标 worker 上不存在 → `state=error`，`state_message = Path does not exist: ...`；成功则 `state=ready` 并自动统计 `size`。
 
 收尾顺序：先删 route（对外断流）再删 model；否则调用方会先 404。
@@ -385,7 +413,7 @@ python3 scripts/gpustack.py --json model-files list \
 18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响；改用账号密码可绕过。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容。实测同一实例用 `--username admin --password ...` 换会话后，`/v2/models` 立刻返回全部 24 条、`instances list` 也正常——所以**优先用账号密码**，API key 只作备选。
 19. **`/v2/dashboard` 不带 `cluster_id` 可能全 0。** 该端点按"当前集群"统计，多集群实例上默认集群未必是有负载的那个；CLI 已支持 `dashboard --cluster-id N`（v2.2.3 单集群实例不带也正常）。
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
-21. **自定义后端按 `backend_version` 拼镜像名，registry 里没有就 404。** 实测 v2.2.1 上用 `--backend bge-custom --backend-version bge-m3-v1.1.0` 部署，worker 报 `Failed to pull image docker.1ms.run/bge-m3:v1.1.0: not found`，实例反复 `error`（`restart_on_error` 会一直重试）。自带 vLLM/SGLang 后端不会踩；要用自定义后端先在目标 worker 上确认镜像存在。
+21. **自定义后端按 `backend_version` 拼镜像名，镜像不在目标 worker 上就 404。** 实测 v2.2.1 上用 `--backend bge-custom --backend-version bge-m3-v1.1.0` 部署，worker 报 `Failed to pull image docker.1ms.run/bge-m3:v1.1.0: not found`，实例反复 `error`（`restart_on_error` 会一直重试）。自带 vLLM/SGLang 后端不会踩；要用自定义后端先在目标 worker 上确认镜像存在。
 22. **`/v2/model-files` 的唯一键是 `(local_path, worker_id)`。** 同路径重复登记回 `409 AlreadyExists`；目标 worker 上没有该路径 → `state=error` + `Path does not exist: ...`；成功则 `state=ready` 并回填 `size`。
 
 ## 6. 端点速查

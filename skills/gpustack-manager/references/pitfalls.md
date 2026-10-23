@@ -177,4 +177,8 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 `gpu_selector={"gpu_ids":["gpu-worker-206:cuda:4"]}`（id 来自 `GET /v2/gpu-devices` 的 `id`）能精确钉卡：实测实例落到 `worker_name=gpu-worker-206`、`gpu_indexes=[4]`，跑完删除后该卡 `used` 立即回落到基线、无残留容器。只写 `gpus_per_replica` 则是“要一张卡”，具体哪张由调度决定。`[实测]`
 
-**统计**：本文件覆盖 26 条坑（§5.1–§5.26），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
+### 5.27 自定义后端的响应结构可能不是 OpenAI 形状
+
+`bge-custom` 的 `/v1/embeddings` 返回 `{"data":[{"index":0,"dense":[...]}]}`，向量在 **`dense`** 而不是 OpenAI 的 `embedding`；`visual-embedding-custom` 同理有自己的形状。CLI 的 `embeddings` 先取 `embedding`、再退 `dense`/`vector`，都没有会把 `data[0]` 的键名打出来。断言维度前先 `--json` 看一眼原始结构。`[实测]`
+
+**统计**：本文件覆盖 27 条坑（§5.1–§5.27），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。

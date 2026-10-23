@@ -108,7 +108,12 @@ def cmd_embeddings(cfg: Config, args: argparse.Namespace) -> int:
     if not data:
         print(result)
         return EXIT_OK
-    vector = data[0].get("embedding") or []
+    # 自定义后端的响应结构未必是 OpenAI 的 embedding 字段：bge-custom 实测返回 data[].dense
+    first = data[0] if isinstance(data[0], dict) else {}
+    vector = first.get("embedding") or first.get("dense") or first.get("vector") or []
+    if not vector:
+        # 结构未知时把键名打出来，别静默显示 0 维
+        print(f"（未识别的向量字段，data[0] 的键：{sorted(first)}）")
     preview = ", ".join(f"{value:.4f}" for value in vector[:8])
     usage = result.get("usage") or {}
     print(
