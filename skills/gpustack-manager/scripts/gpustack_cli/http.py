@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import ApiError
+from . import ApiError, UsageError
 from .config import Config
 
 
@@ -80,6 +80,61 @@ class Response:
             ) from exc
 
 
+_SESSION_CACHE: Dict[Tuple[str, str], str] = {}
+
+
+def login_session(cfg: Config) -> str:
+    """用账号密码换 gpustack_session（表单登录，OAuth2 password 形式）。
+
+    API key 在少数实例上会被 owner principal 过滤（admin key 看不到别人的模型），
+    而 admin 的 Web 会话能看到全量，所以这里保留账号密码通道。
+    """
+    if not cfg.username or not cfg.password:
+        raise UsageError("缺少账号密码：用 --username/--password 或 $GPUSTACK_USERNAME/$GPUSTACK_PASSWORD")
+    key = (cfg.base_url, cfg.username)
+    cached = _SESSION_CACHE.get(key)
+    if cached:
+        return cached
+
+    body = urllib.parse.urlencode({"username": cfg.username, "password": cfg.password}).encode("utf-8")
+    request = urllib.request.Request(cfg.base_url + "/auth/login", data=body, method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    request.add_header("Accept", "application/json")
+    try:
+        with _opener(cfg.insecure, True).open(request, timeout=cfg.timeout) as raw:
+            headers = raw.headers
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = " ".join(exc.read().decode("utf-8", "replace").split())[:BODY_SNIPPET]
+        except OSError:
+            pass
+        raise ApiError(
+            f"POST /auth/login -> HTTP {exc.code}: {detail or '(空响应体)'}"
+            "（账号密码登录失败，检查 --username/--password）"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ApiError(f"POST /auth/login -> 网络错误: {exc.reason}") from exc
+
+    raw_cookies = headers.get_all("Set-Cookie") or []
+    for item in raw_cookies:
+        pair = item.split(";", 1)[0]
+        name, _, value = pair.partition("=")
+        if name.strip() == "gpustack_session" and value:
+            _SESSION_CACHE[key] = value
+            return value
+    raise ApiError("POST /auth/login -> 未拿到 gpustack_session cookie（服务端登录行为与预期不符）")
+
+
+def auth_headers(cfg: Config) -> Dict[str, str]:
+    """账号密码优先于 api-key：两者都给时按会话走（会话权限更宽）。"""
+    if cfg.username and cfg.password:
+        return {"Cookie": "gpustack_session=" + login_session(cfg)}
+    if cfg.api_key:
+        return {"Authorization": "Bearer " + cfg.api_key}
+    return {}
+
+
 def _request(
     cfg: Config,
     method: str,
@@ -98,8 +153,8 @@ def _request(
     request.add_header("Accept", "application/json")
     if body is not None:
         request.add_header("Content-Type", "application/json")
-    if cfg.api_key:
-        request.add_header("Authorization", "Bearer " + cfg.api_key)
+    for name, value in auth_headers(cfg).items():
+        request.add_header(name, value)
 
     method_name = method.upper()
     try:
@@ -136,7 +191,7 @@ def require_ok(response: Response) -> Response:
     snippet = " ".join(response.text.split())[:BODY_SNIPPET] or "(空响应体)"
     hint = ""
     if response.status == 401:
-        hint = "（检查 --api-key / $GPUSTACK_API_KEY / 配置文件）"
+        hint = "（检查 --api-key / $GPUSTACK_API_KEY / 配置文件，或改用 --username/--password）"
     elif response.status == 422:
         hint = "（请求参数未通过服务端校验，检查日期格式/必填项）"
     raise ApiError(f"{response.method} {response.path} -> HTTP {response.status}: {snippet}{hint}")

@@ -106,3 +106,13 @@ jq -r '.components.schemas | to_entries[] | select(.key|test("Enum$"))
 jq -r '.paths["/v2/models"].get.parameters[]? | "\(.name)(\(.in)) req=\(.required//false)"' $F
 jq -c '.paths["/v2/models/{id}"].put.requestBody.content["application/json"]' $F
 ```
+
+# 账号密码登录（首选鉴权）：换 gpustack_session 会话
+# 注意是 form-encoded（OAuth2 password 形式），不是 JSON
+curl -s -c cookies.txt -X POST "$GPUSTACK_BASE_URL/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=$GPUSTACK_USERNAME" \
+  --data-urlencode "password=$GPUSTACK_PASSWORD"
+
+# 之后所有请求带 cookie（会话能看到全量资源，不受 owner principal 过滤）
+curl -s -b cookies.txt "$GPUSTACK_BASE_URL/v2/models" | jq -r '.items[] | "\(.id)\t\(.name)\t\(.ready_replicas)/\(.replicas)"'

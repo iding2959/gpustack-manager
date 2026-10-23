@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.1"
+  version: "0.1.2"
   language: zh
 ---
 
@@ -70,18 +70,31 @@ SKILL.md 只放「让 Agent 会正确操作」的最小集；细节一律去 ref
 
 优先级从高到低：
 
+**鉴权两种，优先账号密码**：
+
+| 方式 | 参数 | 何时用 |
+|---|---|---|
+| **账号密码（首选）** | `--username` / `--password`，或 `$GPUSTACK_USERNAME` / `$GPUSTACK_PASSWORD`，或配置文件 `username`/`password` | 默认走这条：`/auth/login` 换 `gpustack_session` 会话，权限等同 Web 登录用户，看到的是**全量**资源 |
+| API key（备选） | `--api-key` / `$GPUSTACK_API_KEY` / 配置文件 `api_key` | 无密码可用、或只做只读调用时 |
+
+两者同时给时**以账号密码为准**（会话权限更宽：API key 在部分实例上会被 owner principal 过滤，admin key 也看不到别人的模型，见第 5 章第 18 条）。
+
+配置来源优先级：命令行参数 > 环境变量 > 配置文件 > 默认值。
+
 | 来源 | 键 | 说明 |
 |---|---|---|
-| 命令行参数 | `--base-url` / `--api-key` | 临时覆盖，最高优先级 |
-| 环境变量 | `GPUSTACK_BASE_URL` / `GPUSTACK_API_KEY` | **推荐**，Agent 场景默认走这条 |
+| 命令行参数 | `--base-url` `--username` `--password` `--api-key` | 临时覆盖，最高优先级 |
+| 环境变量 | `GPUSTACK_BASE_URL` `GPUSTACK_USERNAME` `GPUSTACK_PASSWORD` | 推荐给 CI/Agent |
 | 配置文件 | `~/.gpustack/config.json` | 常驻配置，避免每次传参 |
 | 内置默认 | `http://127.0.0.1` | 只在同机部署时成立 |
 
 配置文件（`chmod 600`，不要提交进 git）：
 
 ```json
-{"base_url": "http://192.168.0.202", "api_key": "gpustack_xxx_yyy"}
+{"base_url": "http://192.168.0.202", "username": "admin", "password": "***", "api_key": "gpustack_xxx_yyy"}
 ```
+
+会话 cookie 只存在进程内存里，不落盘；登录失败会直接报 `POST /auth/login -> HTTP 401`。
 
 | 全局参数 | 用途 |
 |---|---|
@@ -342,7 +355,7 @@ python3 scripts/gpustack.py --json gpus list \
 15. **`tp × pp` 的世界大小必须等于 GPU 数。** 否则实例永远 pending，报 `selected gpu count does not match`。
 16. **`instances logs --tail` 名义上控行数，实测按"日志块"返回。** `--tail 3` 实际回了 30 行（多行块整体返回），`--tail 200` 约等于全量。要精确行数用 `instances logs <id> | tail -n N`。
 17. **列表分页默认 `perPage=100`。** 大集群要翻页：`raw GET '/v2/models?page=2&perPage=100'`。
-18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容——先用 `dashboard --cluster-id` 与 `my-models` 交叉验证。
+18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响；改用账号密码可绕过。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容。实测同一实例用 `--username admin --password ...` 换会话后，`/v2/models` 立刻返回全部 24 条、`instances list` 也正常——所以**优先用账号密码**，API key 只作备选。
 19. **`/v2/dashboard` 不带 `cluster_id` 可能全 0。** 该端点按"当前集群"统计，多集群实例上默认集群未必是有负载的那个；CLI 已支持 `dashboard --cluster-id N`（v2.2.3 单集群实例不带也正常）。
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
 

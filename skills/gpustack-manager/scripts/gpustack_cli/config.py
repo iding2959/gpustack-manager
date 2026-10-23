@@ -23,6 +23,10 @@ class Config:
     api_key: Optional[str]
     timeout: float
     insecure: bool
+    # 账号密码登录（Web 会话）：API key 在部分实例上会被 owner principal 过滤，
+    # 而 admin 的会话能看到全量，所以两条鉴权通道都要留
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 def load_config_file(path: str, explicit: bool) -> Dict[str, Any]:
@@ -74,6 +78,23 @@ def resolve_config(args: argparse.Namespace) -> Config:
     else:
         api_key = None
 
+    username = (
+        getattr(args, "username", None)
+        or os.environ.get("GPUSTACK_USERNAME")
+        or file_values.get("username")
+    )
+    password = (
+        getattr(args, "password", None)
+        or os.environ.get("GPUSTACK_PASSWORD")
+        or file_values.get("password")
+    )
+    username = username.strip() if isinstance(username, str) and username.strip() else None
+    password = password if isinstance(password, str) and password else None
+    if password and not username:
+        raise UsageError("给了 --password 但没给 --username（账号密码登录两者都要）")
+    if username and not password:
+        raise UsageError("给了 --username 但没给 --password（账号密码登录两者都要）")
+
     timeout = getattr(args, "timeout", DEFAULT_TIMEOUT)
     if timeout is None or timeout <= 0:
         raise UsageError(f"--timeout 必须大于 0，收到: {timeout}")
@@ -83,4 +104,6 @@ def resolve_config(args: argparse.Namespace) -> Config:
         api_key=api_key,
         timeout=float(timeout),
         insecure=bool(getattr(args, "insecure", False)),
+        username=username,
+        password=password,
     )

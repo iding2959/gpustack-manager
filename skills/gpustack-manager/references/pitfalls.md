@@ -151,7 +151,11 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 结论：列表与详情都按 **owner principal 相等** 过滤，`is_admin=true` **不会**绕过；`owner_principal_id=7` 是另一类 principal（组织/system 级）持有的历史数据。加 org 头无效。`[实测]`
 
-绕开方式：`dashboard --cluster-id <id>` 看聚合计数、`my-models` 看对外入口（含就绪度）、`model-files` 看文件清单；要按 owner 视角看全部 Model 定义，得拿 owner principal 对应的凭据，或直接在服务端查库（`models` 表按 `owner_principal_id` 分组）。
+绕开方式（按推荐顺序）：
+
+1. **改用账号密码登录**（首选）：`--username admin --password ...` → `POST /auth/login` 拿 `gpustack_session`，同一实例 `/v2/models` 立刻返回全部 24 条、`instances list` 23 条也全都在。CLI 已支持，且**同时给两种凭据时以账号密码为准**。
+2. `dashboard --cluster-id <id>` + `my-models` + `model-files` 交叉看聚合与对外入口（只有 API key 时的替代视图）。
+3. 拿 owner principal 对应凭据，或服务端查库（`select owner_principal_id, count(*) from models group by 1;`）。
 
 ### 5.22 `/v2/dashboard` 不带 `cluster_id` 可能全 0
 

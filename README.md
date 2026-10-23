@@ -36,17 +36,25 @@ CLI 自带在 skill 目录里（安装 skill 即得到）：`skills/gpustack-man
 
 ## 配置
 
-优先级：命令行参数 > 环境变量 > 配置文件 > 默认值。
+**两种鉴权，优先账号密码**（Web 会话权限更宽）：
+
+| 方式 | 参数 | 说明 |
+|---|---|---|
+| 账号密码（首选） | `--username` / `--password` 或 `$GPUSTACK_USERNAME` / `$GPUSTACK_PASSWORD` | `/auth/login` 换 `gpustack_session`，看到的是全量资源 |
+| API key（备选） | `--api-key` 或 `$GPUSTACK_API_KEY` | 部分实例上会被 owner principal 过滤，admin key 也看不到别人的模型 |
+
+同时给两种时以账号密码为准。优先级：命令行参数 > 环境变量 > 配置文件 > 默认值。
 
 ```bash
 export GPUSTACK_BASE_URL=http://192.168.0.202   # 不要带 /v1
-export GPUSTACK_API_KEY=gpustack_xxxxxxxx_yyyy  # 千万别硬编码进脚本
+export GPUSTACK_USERNAME=admin
+export GPUSTACK_PASSWORD='***'                  # 千万别硬编码进脚本/仓库
 ```
 
-或写 `~/.gpustack/config.json`：
+或写 `~/.gpustack/config.json`（`chmod 600`）：
 
 ```json
-{ "base_url": "http://192.168.0.202", "api_key": "gpustack_xxxxxxxx_yyyy" }
+{ "base_url": "http://192.168.0.202", "username": "admin", "password": "***", "api_key": "gpustack_xxxxxxxx_yyyy" }
 ```
 
 ## 快速开始

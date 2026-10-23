@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 cluster operations and inference-service managemen
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.1"
+  version: "0.1.2"
   language: en
 ---
 

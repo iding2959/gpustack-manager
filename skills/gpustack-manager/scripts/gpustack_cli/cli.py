@@ -70,6 +70,18 @@ def build_common_parser() -> argparse.ArgumentParser:
         help="API key；优先级 参数 > $GPUSTACK_API_KEY > 配置文件（不要写进脚本）",
     )
     common.add_argument(
+        "--username",
+        metavar="USER",
+        default=argparse.SUPPRESS,
+        help="账号密码登录的用户名（与 --password 同用；优先级 参数 > $GPUSTACK_USERNAME > 配置文件）",
+    )
+    common.add_argument(
+        "--password",
+        metavar="PASS",
+        default=argparse.SUPPRESS,
+        help="账号密码登录的密码（不落盘、不写日志；也可用 $GPUSTACK_PASSWORD）",
+    )
+    common.add_argument(
         "--config",
         metavar="PATH",
         default=argparse.SUPPRESS,
@@ -147,6 +159,8 @@ def fill_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "config": None,
         "timeout": DEFAULT_TIMEOUT,
         "insecure": False,
+        "username": None,
+        "password": None,
     }
     for name, default in defaults.items():
         if not hasattr(args, name):
