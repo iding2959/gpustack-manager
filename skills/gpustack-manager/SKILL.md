@@ -12,13 +12,13 @@ metadata:
 
 面向 GPUStack v2.2.3 的运维 skill。所有命令、输出示例与结论均在真实实例（Docker provider、NVIDIA L40 48GB）上跑过核对，不是照 OpenAPI schema 猜的。
 
-CLI 是仓库里的单文件脚本 `scripts/gpustack.py`：Python 3.9+，**仅标准库**（urllib），零安装。下文示例统一写 `scripts/gpustack.py`，执行时按你 clone 到的实际仓库根替换路径。
+CLI 就在本 skill 目录里：入口 `scripts/gpustack.py`，实现在同目录的 `scripts/gpustack_cli/` 包（入口只做导入与分发；Python 3.9+，**仅标准库**，零安装）。安装后路径为 `<agent skills 目录>/gpustack-manager/scripts/gpustack.py`；下文命令都以 **skill 目录为工作目录**，先 `cd` 进去再执行（`python3 scripts/gpustack.py …`）。
 
 三条约定：
 
 - 退出码：`0` 成功；`1` API/网络错误（stderr 打印 `<METHOD> <PATH> -> HTTP <code>: <body>`）；`2` 参数错误（含"没给 `--yes`"这类拒绝）。
 - 默认输出人读表格（中文表头，末尾带 `共 N 个…`）；任何命令加 `--json` 输出原始 API JSON，可直接 `| jq`。
-- 危险操作必须显式确认：`models delete` 需 `--yes`，`workers maintenance` 需 `--enable/--disable`。
+- 危险操作必须显式确认：`models delete` / `routes delete` 需 `--yes`，`workers maintenance` 需 `--enable/--disable`。
 
 ## 1. 快速开始
 
@@ -31,7 +31,7 @@ python3 scripts/gpustack.py models list     # 模型清单与副本就绪度
 python3 scripts/gpustack.py workers list    # worker 状态、CPU/内存、GPU 数
 ```
 
-真实输出：
+典型输出（实测样例，模型名/数值随实例变化）：
 
 ```
 $ python3 scripts/gpustack.py health
@@ -45,11 +45,6 @@ $ python3 scripts/gpustack.py models list
 ID  名称             副本(ready/total)  后端  来源        状态
 --  ---------------  -----------------  ----  ----------  ---------
 2   qwen35-9b-local  0/1                vLLM  local_path  not_ready
-
-$ python3 scripts/gpustack.py workers list
-ID  名称          IP             状态   CPU%  内存 used/total  GPU 数
---  ------------  -------------  -----  ----  ---------------  ------
-1   b09881df3af9  192.168.0.202  ready  7.2%  10.4GiB/62.8GiB  1
 ```
 
 机器可读：
@@ -59,6 +54,17 @@ python3 scripts/gpustack.py --json models list | jq -r '.items[] | "\(.id)\t\(.n
 ```
 
 `health` 三项含义：`healthz` 进程活着；`readyz` 依赖（数据库/调度器）就绪；`version` 返回 `v2.2.3 (git 1cfcbbf)`。`readyz` 非 200 时不要再做写操作。
+
+### 1.1 参考文件（按需读，不要整份加载）
+
+| 文件 | 什么时候读 |
+|---|---|
+| `references/endpoints.md` | 要查 CLI 未封装的端点、查询参数、分页/过滤细节 |
+| `references/schemas.md` | 要确认字段名、枚举值、必填项（ModelCreate/ModelUpdate/Worker 等） |
+| `references/pitfalls.md` | **排障前必读**：完整坑清单 + 实测证据（本文件只留高频条目） |
+| `references/curl.md` | 需要手写 curl 或脱离 CLI 调用时 |
+
+SKILL.md 只放「让 Agent 会正确操作」的最小集；细节一律去 references 取，避免一次性灌满上下文。
 
 ## 2. 配置
 
@@ -135,17 +141,7 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `huggingface` | `huggingface_repo_id`（单文件再加 `huggingface_filename`） |
 | `model_scope` | `model_scope_model_id`（单文件再加 `model_scope_file_path`） |
 
-少一个定位字段直接 **422**：`Value error, local_path must be provided when source is 'local_path'`（实测只发 `{source,name,replicas}` 必挂）。注意 OpenAPI 里 `ModelUpdate` 的 required 只写了 `source`+`name`，这条是运行时按 source 做的交叉校验，光看 schema 发现不了。`--dry-run` 打印的就是最终请求体：
-
-```
-[dry-run] PUT /v2/models/2 请求体（未发送）:
-{
-  "source": "local_path",
-  "name": "qwen35-9b-local",
-  "local_path": "/mnt/models/Qwen3.5-9B",
-  "replicas": 0
-}
-```
+少一个定位字段直接 **422**：`Value error, local_path must be provided when source is 'local_path'`（实测只发 `{source,name,replicas}` 必挂）。注意 OpenAPI 里 `ModelUpdate` 的 required 只写了 `source`+`name`，这条是运行时按 source 做的交叉校验，光看 schema 发现不了。`--dry-run` 打印的就是最终请求体，例如 `{"source":"local_path","name":"qwen35-9b-local","local_path":"/mnt/models/Qwen3.5-9B","replicas":0}`。
 
 反过来，**不能**回写 `GET` 回来的整对象——只读字段（`state`/`ready_replicas`/`created_at`）会被拒。白名单原则：`source` + `name` + `replicas` + 该 source 的定位字段，仅此。
 
@@ -169,23 +165,17 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 |---|---|
 | `--name NAME` | 必填，模型名（`/v1` 里的 model 字段） |
 | `--source {huggingface,model_scope,local_path}` | 必填。v2.2.3 **没有** `ollama_library` |
-| `--hf-repo-id` / `--hf-filename` | `source=huggingface` 时用 |
-| `--ms-model-id` / `--ms-file-path` | `source=model_scope` 时用 |
+| `--hf-repo-id` / `--hf-filename` / `--ms-model-id` / `--ms-file-path` | 按 source 选：HuggingFace / ModelScope 的仓库与可选单文件 |
 | `--local-path PATH` | `source=local_path` 时用，必须是 **worker 容器内可见**路径 |
 | `--backend NAME` | 后端**显示名**：`vLLM` / `SGLang` / `MindIE` / `VoxBox`（来自 `backends list`） |
 | `--backend-version VER` | 如 `0.25.1`；不传取 `default_version` |
-| `--image-name IMAGE` | 自定义运行时镜像（覆盖后端默认镜像） |
 | `--replicas N` | 副本数，默认 1；可为 0（只建定义不起实例） |
 | `--gpu-selector JSON` | v2.2.3 形如 `'{"gpus_per_replica": 1}'` 或 `'{"gpu_ids": ["<worker>:cuda:0"]}'`，见第 5 章第 11 条 |
-| `--worker-selector JSON` | 如 `'{"worker-name": "b09881df3af9"}'` |
 | `--backend-parameter "--flag value"` | 可重复；一次给 flag 与值（内部按 shell 词法拆分） |
-| `--placement-strategy {spread,binpack}` | 默认 `spread` |
 | `--cluster-id N` | 不传自动取 `is_default=true` 的集群 |
-| `--cpu-offloading` / `--no-cpu-offloading` | 显存不足时把部分权重放内存 |
-| `--distributed-inference` | 跨 worker 分布式推理 |
-| `--env KEY=VALUE` | 可重复，容器环境变量 |
-| `--description TEXT` | 备注 |
 | `--dry-run` | 只打印将要提交的请求体，不发请求（部署前必用） |
+
+其余（`--worker-selector`、`--image-name`、`--placement-strategy`、`--cpu-offloading`、`--distributed-inference`、`--env`、`--description`）语义见 `references/schemas.md` 的 ModelCreate 一节。
 
 最小可用例子：
 
@@ -332,7 +322,7 @@ python3 scripts/gpustack.py --json gpus list \
 
 ## 5. 关键坑
 
-全部来自实测，按踩到频率排序。
+全部来自实测，按踩到频率排序；完整清单、复现命令与证据在 `references/pitfalls.md`。
 
 1. **创建模型不带 `cluster_id` 直接 500。** schema 里它是可选，实际报 `null value in column "cluster_id" ... violates not-null constraint`。CLI 已默认取 `GET /v2/clusters` 里 `is_default=true` 的集群（`--dry-run` 可见请求体里带上了 `cluster_id`）；手写 curl 必须显式传。
 2. **`local_path` 必须是 worker 容器内可见的路径。** 默认 compose 只挂 `/var/lib/gpustack`，`/mnt/models` 在容器里不存在，模型会一直卡在 `scheduled`。宿主侧必须给 worker 容器加 `- /mnt/models:/mnt/models:ro`。
@@ -354,40 +344,32 @@ python3 scripts/gpustack.py --json gpus list \
 
 ## 6. 端点速查
 
-CLI 没封装到的场景直接 `raw` 或 curl。鉴权头统一 `Authorization: Bearer $GPUSTACK_API_KEY`。
+CLI 没封装到的场景直接 `raw` 或 curl。鉴权头统一 `Authorization: Bearer $GPUSTACK_API_KEY`。完整端点表（190 operations、按 tag 分组、含查询参数）在 `references/endpoints.md`，这里只留日常用的那几条。
 
 | 用途 | 方法与路径 |
 |---|---|
-| 探针 | `GET /healthz` `GET /readyz` `GET /version` |
-| 当前用户 | `GET /v2/users/me` |
-| 集群 | `GET /v2/clusters` `GET /v2/clusters/{id}` |
-| worker | `GET /v2/workers` `GET /v2/workers/{id}` `PUT /v2/workers/{id}` |
-| GPU | `GET /v2/gpu-devices` |
+| 探针 / 当前用户 | `GET /healthz` `GET /readyz` `GET /version` `GET /v2/users/me` |
+| 集群 / worker / GPU | `GET /v2/clusters[/{id}]` `GET/PUT /v2/workers[/{id}]` `GET /v2/gpu-devices` |
 | 模型 | `GET/POST /v2/models` `GET/PUT/DELETE /v2/models/{id}` |
-| 模型实例 | `GET /v2/model-instances` `GET /v2/model-instances/{id}` `GET /v2/model-instances/{id}/logs?tail=&follow=` `GET /v2/models/{id}/instances` |
-| 模型文件 | `GET /v2/model-files` |
-| 后端 | `GET /v2/inference-backends` |
-| 路由 | `GET /v2/model-routes` |
-| 概览 | `GET /v2/dashboard` |
-| 用量 | `GET /v2/usage/summary?start_date=&end_date=` `GET /v2/usage/meta` |
-| API key | `GET /v2/api-keys` |
-| 我可见的模型 | `GET /v2/my-models` |
+| 模型实例 | `GET /v2/model-instances[/{id}]` `GET /v2/model-instances/{id}/logs?tail=&follow=` `GET /v2/models/{id}/instances` |
+| 路由 / 后端 / 模型文件 | `GET/POST /v2/model-routes` `GET /v2/inference-backends` `GET /v2/model-files` |
+| 概览 / 用量 | `GET /v2/dashboard` `GET /v2/usage/summary?start_date=&end_date=` `GET /v2/usage/meta` |
+| API key / 我可见的模型 | `GET /v2/api-keys` `GET /v2/my-models` |
 | Grafana 跳转 | `GET /v2/{workers\|models\|model-instances\|clusters}/{id}/dashboard`（302） |
 | OpenAI 兼容 | `POST /v1/chat/completions` `POST /v1/embeddings` `GET /v1/models` |
 
-curl 模板：
+逃生口与 curl 模板（更多在 `references/curl.md`）：
 
 ```bash
 curl -s -H "Authorization: Bearer $GPUSTACK_API_KEY" \
   "$GPUSTACK_BASE_URL/v2/model-instances" | jq -r '.items[] | "\(.id)\t\(.state)"'
 
-# 逃生口
 python3 scripts/gpustack.py raw GET /v2/usage/meta
 python3 scripts/gpustack.py raw POST /v1/chat/completions \
   --data '{"model":"qwen3-8b","messages":[{"role":"user","content":"hi"}],"max_tokens":16}'
 ```
 
-响应包裹：CLI 覆盖的列表接口都是 `{"items":[...],"pagination":{"page":1,"perPage":100,"total":N,"totalPage":M}}`；少数端点例外（`/v2/gpu-instance-types`、`/v2/inference-backends/list` 只有 `items` 无 `pagination`，`/v2/inference-backends/all` 是裸数组），写通用客户端要先判 `items` 再判 `pagination` 是否存在。错误体 `{"code":<http>,"error":{"message":...}}`，HTTP 状态码与 `code` 一致。
+响应包裹：CLI 覆盖的列表接口都是 `{"items":[...],"pagination":{...}}`；少数端点例外（`/v2/gpu-instance-types`、`/v2/inference-backends/list` 无 `pagination`，`/v2/inference-backends/all` 是裸数组）——先判 `items` 再判 `pagination`。错误体 `{"code":<http>,"error":{"message":...}}`，HTTP 状态码与 `code` 一致。
 
 ## 7. 安全边界
 

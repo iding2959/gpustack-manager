@@ -46,12 +46,43 @@ jobs:
           print("skills OK")
           PY
 
-      # CLI 必须保持仅标准库，否则安装方还要装依赖
-      - name: 校验脚本仅用标准库
+      # 单文件膨胀会让 Agent 整份读进上下文，白烧 token；上限 500 行
+      - name: 校验单文件行数 ≤ 500
         run: |
-          python3 -m py_compile scripts/gpustack.py
-          if grep -nE '^\s*(import|from)\s+(requests|httpx|yaml|click|rich)\b' scripts/gpustack.py; then
-            echo "scripts/gpustack.py 引入了第三方依赖"; exit 1
+          python3 - <<'PY'
+          import pathlib, sys
+
+          LIMIT = 500
+          SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
+          bad = []
+          for f in sorted(pathlib.Path(".").rglob("*")):
+              if not f.is_file() or f.suffix not in {".md", ".py"}:
+                  continue
+              if SKIP_DIRS & set(f.parts):
+                  continue
+              n = len(f.read_text(encoding="utf-8").splitlines())
+              if n > LIMIT:
+                  bad.append(f"{f}: {n} 行 (> {LIMIT})")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("file size OK")
+          PY
+
+      # CLI 必须保持仅标准库，否则安装方还要装依赖
+      - name: 校验 CLI 仅用标准库且可运行
+        run: |
+          python3 -m compileall -q skills/gpustack-manager/scripts
+          if grep -rnE '^\s*(import|from)\s+(requests|httpx|yaml|click|rich)\b' skills/gpustack-manager/scripts; then
+            echo "引用了第三方依赖"; exit 1
           fi
-          python3 scripts/gpustack.py --help > /dev/null
+          python3 skills/gpustack-manager/scripts/gpustack.py --help > /dev/null
           echo "cli OK"
+
+      # 密钥不能进仓库
+      - name: 校验无明文密钥
+        run: |
+          if grep -rnE '(gpustack_[A-Za-z0-9]{8,}_[A-Za-z0-9]{8,}|Bearer [0-9]{6,})' --include="*.md" --include="*.py" .; then
+            echo "疑似明文密钥"; exit 1
+          fi
+          echo "no secret OK"

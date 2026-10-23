@@ -2,7 +2,7 @@
 
 GPUStack 集群管理 Agent Skill（v2.2.3 实测沉淀）：模型部署 / 启停 / 扩缩容、实例日志排障、worker 维护、GPU 资源查询、OpenAI 兼容推理冒烟。
 
-配套一个**仅用 Python 标准库**的单文件 CLI：`scripts/gpustack.py`，零安装、零依赖，Agent 直接 `python3` 调用即可。
+配套一个**仅用 Python 标准库**的 CLI：`skills/gpustack-manager/scripts/gpustack.py`，零安装、零依赖，Agent 直接 `python3` 调用即可。
 
 [![skills.sh](https://skills.sh/b/iding2959/gpustack-manager)](https://www.skills.sh/iding2959/gpustack-manager)
 
@@ -27,9 +27,12 @@ npx skills add iding2959/gpustack-manager --skill gpustack-manager
 
 # 全局安装
 npx skills add iding2959/gpustack-manager -g
+
+# 装完 CLI 在 skill 目录里（中英两个 skill 会一起装）
+~/.claude/skills/gpustack-manager/scripts/gpustack.py --help
 ```
 
-也可以直接把 `scripts/gpustack.py` 拷到任意位置使用，无依赖。
+CLI 自带在 skill 目录里（安装 skill 即得到）：`skills/gpustack-manager/scripts/gpustack.py`，也可整目录拷到任意位置使用，无第三方依赖。
 
 ## 配置
 
@@ -49,28 +52,28 @@ export GPUSTACK_API_KEY=gpustack_xxxxxxxx_yyyy  # 千万别硬编码进脚本
 ## 快速开始
 
 ```bash
-python3 scripts/gpustack.py health                 # /healthz /readyz /version
-python3 scripts/gpustack.py models list            # 模型列表（副本/后端/来源/状态）
-python3 scripts/gpustack.py instances list         # 运行中的实例（worker/IP/端口/PID）
-python3 scripts/gpustack.py workers list           # worker 与资源占用
-python3 scripts/gpustack.py gpus list              # GPU 型号/显存/已分配
+python3 skills/gpustack-manager/scripts/gpustack.py health                 # /healthz /readyz /version
+python3 skills/gpustack-manager/scripts/gpustack.py models list            # 模型列表（副本/后端/来源/状态）
+python3 skills/gpustack-manager/scripts/gpustack.py instances list         # 运行中的实例（worker/IP/端口/PID）
+python3 skills/gpustack-manager/scripts/gpustack.py workers list           # worker 与资源占用
+python3 skills/gpustack-manager/scripts/gpustack.py gpus list              # GPU 型号/显存/已分配
 ```
 
 真实输出（对 v2.2.3 实例实测）：
 
 ```text
-$ python3 scripts/gpustack.py models list
+$ python3 skills/gpustack-manager/scripts/gpustack.py models list
 ID  名称             副本(ready/total)  后端  来源        状态
 --  ---------------  -----------------  ----  ----------  -------
 2   qwen35-9b-local  0/0                vLLM  local_path  stopped
 5   bge-m3-local     1/1                vLLM  local_path  ready
 
-$ python3 scripts/gpustack.py instances list
+$ python3 skills/gpustack-manager/scripts/gpustack.py instances list
 ID  模型          状态     worker        IP             端口   PID
 --  ------------  -------  ------------  -------------  -----  ----
 4   bge-m3-local  running  b09881df3af9  192.168.0.202  40059  2553
 
-$ python3 scripts/gpustack.py routes list
+$ python3 skills/gpustack-manager/scripts/gpustack.py routes list
 ID  名称             targets  ready_targets  访问策略
 --  ---------------  -------  -------------  --------
 2   bge-m3-local     1        1              authed
@@ -79,42 +82,42 @@ ID  名称             targets  ready_targets  访问策略
 任何命令加 `--json` 输出原始 API JSON，可直接接 `jq`：
 
 ```bash
-python3 scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
+python3 skills/gpustack-manager/scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
 ```
 
 ## 常用操作
 
 ```bash
 # 停止 / 启动 / 扩缩容（本质是把 replicas 改到目标值）
-python3 scripts/gpustack.py models stop  qwen35-9b-local
-python3 scripts/gpustack.py models start qwen35-9b-local
-python3 scripts/gpustack.py models scale qwen35-9b-local -r 3
+python3 skills/gpustack-manager/scripts/gpustack.py models stop  qwen35-9b-local
+python3 skills/gpustack-manager/scripts/gpustack.py models start qwen35-9b-local
+python3 skills/gpustack-manager/scripts/gpustack.py models scale qwen35-9b-local -r 3
 
 # 从本地目录部署（路径必须在 worker 容器内可见）
-python3 scripts/gpustack.py models create \
+python3 skills/gpustack-manager/scripts/gpustack.py models create \
   --name qwen35-9b-local --source local_path \
   --local-path /mnt/models/Qwen3.5-9B --backend vLLM --replicas 1
 
 # 从 HuggingFace 部署
-python3 scripts/gpustack.py models create \
+python3 skills/gpustack-manager/scripts/gpustack.py models create \
   --name qwen3-0.6b --source huggingface \
   --hf-repo-id Qwen/Qwen3-0.6B --backend vLLM
 
 # 对外暴露推理：v2.2.3 必须建 model route，否则 /v1/models 为空、chat 404
-python3 scripts/gpustack.py routes create --name bge-m3-local --model bge-m3-local
-python3 scripts/gpustack.py routes list
+python3 skills/gpustack-manager/scripts/gpustack.py routes create --name bge-m3-local --model bge-m3-local
+python3 skills/gpustack-manager/scripts/gpustack.py routes list
 
 # 排障：看实例日志（tail 按日志块计，要精确行数就再 | tail -n 50）
-python3 scripts/gpustack.py instances logs 4 --tail 100
+python3 skills/gpustack-manager/scripts/gpustack.py instances logs 4 --tail 100
 
 # worker 维护模式（摘流前先确认上面没有跑模型）
-python3 scripts/gpustack.py workers maintenance 1 --enable
+python3 skills/gpustack-manager/scripts/gpustack.py workers maintenance 1 --enable
 
 # 推理冒烟
-python3 scripts/gpustack.py chat --model qwen35-9b-local --prompt "用一句话解释 MoE"
+python3 skills/gpustack-manager/scripts/gpustack.py chat --model qwen35-9b-local --prompt "用一句话解释 MoE"
 
 # 逃生口：任意端点
-python3 scripts/gpustack.py raw GET /v2/model-instances --query model_id=2
+python3 skills/gpustack-manager/scripts/gpustack.py raw GET /v2/model-instances --query model_id=2
 ```
 
 ## 命令表
@@ -158,14 +161,23 @@ python3 scripts/gpustack.py raw GET /v2/model-instances --query model_id=2
 
 ## 仓库结构
 
+无单文件超过 500 行——大块内容拆到 `references/` 按需读取，避免 Agent 每次整份读入浪费上下文。
+
 ```
 gpustack-manager/
-├── skills/gpustack-manager/SKILL.md       # 中文 skill（默认）
-├── skills/gpustack-manager-en/SKILL.md    # English skill
-├── scripts/gpustack.py                    # 单文件 CLI（仅标准库）
-├── docs/api-reference.md                  # 190 个 operation 的端点地图 + 18 条坑
-├── skills.sh.json                         # skills.sh 页面分组
-└── .github/workflows/validate-skills.yml  # CI：frontmatter 校验 + 仅标准库校验
+├── skills/gpustack-manager/
+│   ├── SKILL.md                       # 中文入口（Agent 每次必读，≤500 行）
+│   ├── references/                    # 按需加载
+│   │   ├── endpoints.md               #   端点地图（190 个 operation）
+│   │   ├── schemas.md                 #   对象字段 / 枚举
+│   │   ├── pitfalls.md                #   实测坑全集（排障前必读）
+│   │   └── curl.md                    #   手写 curl/jq 片段
+│   └── scripts/
+│       ├── gpustack.py                # CLI 入口（仅标准库）
+│       └── gpustack_cli/              #   config / http / output / resolve / cli + commands/
+├── skills/gpustack-manager-en/SKILL.md # 英文入口
+├── skills.sh.json                      # skills.sh 页面分组
+└── .github/workflows/validate-skills.yml  # CI：frontmatter、行数、仅标准库、无明文密钥
 ```
 
 ## 环境与验证

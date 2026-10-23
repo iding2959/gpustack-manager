@@ -12,7 +12,7 @@ metadata:
 
 Operations skill for GPUStack v2.2.3. Every command, sample output and claim below was executed against a live instance (Docker provider, NVIDIA L40 48GB) — not inferred from the OpenAPI schema.
 
-The CLI is a single stdlib-only script, `scripts/gpustack.py` (Python 3.9+, `urllib` only, zero install). Examples use `scripts/gpustack.py`; substitute the path where you cloned the repo. Tables use Chinese headers with a trailing `共 N 个…` line; `--json` emits raw API JSON that is always jq-safe.
+The CLI ships **inside the Chinese skill**: entry point `../gpustack-manager/scripts/gpustack.py`, implementation package `../gpustack-manager/scripts/gpustack_cli/` next to it (Python 3.9+, stdlib only, zero install). Run the commands below from this skill's directory. Both skills are normally installed together (`npx skills add` installs every skill in the repo) — that is what puts the CLI and `references/` on disk. Tables use Chinese headers with a trailing `共 N 个…` line; `--json` emits raw API JSON that is always jq-safe.
 
 - Exit codes: `0` success, `1` API/network error (stderr `<METHOD> <PATH> -> HTTP <code>: <body>`), `2` bad arguments (including a refused `--yes`-less delete). Destructive actions need explicit confirmation: `models delete` / `routes delete` require `--yes`, `workers maintenance` requires `--enable/--disable`.
 
@@ -22,20 +22,31 @@ The CLI is a single stdlib-only script, `scripts/gpustack.py` (Python 3.9+, `url
 export GPUSTACK_BASE_URL=http://192.168.0.202   # cluster control plane
 export GPUSTACK_API_KEY=...                     # env only — never hardcode
 
-python3 scripts/gpustack.py health          # healthz / readyz / version
-python3 scripts/gpustack.py models list     # models + replica readiness
-python3 scripts/gpustack.py workers list    # worker state, CPU/mem, GPU count
-python3 scripts/gpustack.py --json models list | jq -r '.items[] | "\(.id)\t\(.name)\t\(.ready_replicas)/\(.replicas)"'
+python3 ../gpustack-manager/scripts/gpustack.py health          # healthz / readyz / version
+python3 ../gpustack-manager/scripts/gpustack.py models list     # models + replica readiness
+python3 ../gpustack-manager/scripts/gpustack.py workers list    # worker state, CPU/mem, GPU count
+python3 ../gpustack-manager/scripts/gpustack.py --json models list | jq -r '.items[] | "\(.id)\t\(.name)\t\(.ready_replicas)/\(.replicas)"'
 ```
 
 ```
-$ python3 scripts/gpustack.py models list
+$ python3 ../gpustack-manager/scripts/gpustack.py models list
 ID  名称             副本(ready/total)  后端  来源        状态
 --  ---------------  -----------------  ----  ----------  ---------
 2   qwen35-9b-local  0/1                vLLM  local_path  not_ready
 ```
 
 `health` fields: `healthz` = process alive, `readyz` = dependencies ready, `version` = `v2.2.3 (git 1cfcbbf)`. Do not issue writes while `readyz` is non-200.
+
+### 1.1 Reference files (read on demand, never wholesale)
+
+| File | Read it when |
+|---|---|
+| `../gpustack-manager/references/endpoints.md` | You need an endpoint, query parameter, pagination or filter detail the CLI does not wrap |
+| `../gpustack-manager/references/schemas.md` | You must confirm field names, enums or required fields (ModelCreate/ModelUpdate/Worker…) |
+| `../gpustack-manager/references/pitfalls.md` | **Before troubleshooting**: full pitfall list with reproduction and evidence |
+| `../gpustack-manager/references/curl.md` | You need hand-written curl or must bypass the CLI |
+
+This SKILL.md keeps only the minimum needed to operate correctly; details live in the reference files so a single load stays cheap.
 
 ## 2. Configuration
 
@@ -121,26 +132,20 @@ Omitting it is an immediate **422**: `Value error, local_path must be provided w
 |---|---|
 | `--name NAME` | Required; the model field used by `/v1` |
 | `--source {huggingface,model_scope,local_path}` | Required. v2.2.3 has **no** `ollama_library` |
-| `--hf-repo-id` / `--hf-filename` | For `source=huggingface` (filename for a single file) |
-| `--ms-model-id` / `--ms-file-path` | For `source=model_scope` (file path for a single file) |
+| `--hf-repo-id` / `--hf-filename` / `--ms-model-id` / `--ms-file-path` | Per source: HuggingFace / ModelScope repo and optional single file |
 | `--local-path PATH` | For `source=local_path`; must be visible **inside the worker container** |
 | `--backend NAME` | Display name: `vLLM` / `SGLang` / `MindIE` / `VoxBox` (from `backends list`) |
 | `--backend-version VER` | e.g. `0.25.1`; defaults to `default_version` |
-| `--image-name IMAGE` | Custom runtime image overriding the backend default |
 | `--replicas N` | Default 1; `0` creates the definition without instances |
 | `--gpu-selector JSON` | v2.2.3 shape: `'{"gpus_per_replica": 1}'` or `'{"gpu_ids": ["<worker>:cuda:0"]}'` — see Pitfall 11 |
-| `--worker-selector JSON` | e.g. `'{"worker-name": "b09881df3af9"}'` |
 | `--backend-parameter "--flag value"` | Repeatable; pass flag and value together (split by shell lexer) |
-| `--placement-strategy {spread,binpack}` | Default `spread` |
 | `--cluster-id N` | Defaults to the `is_default=true` cluster |
-| `--cpu-offloading` / `--no-cpu-offloading` | Spill weights to RAM |
-| `--distributed-inference` | Cross-worker distributed inference |
-| `--env KEY=VALUE` | Repeatable container env |
-| `--description TEXT` | Free-form note |
 | `--dry-run` | Print the request body without sending it (use before every real create) |
 
+The rest (`--worker-selector`, `--image-name`, `--placement-strategy`, `--cpu-offloading`, `--distributed-inference`, `--env`, `--description`) is documented in `../gpustack-manager/references/schemas.md` (ModelCreate).
+
 ```bash
-python3 scripts/gpustack.py models create --name qwen35-9b-local \
+python3 ../gpustack-manager/scripts/gpustack.py models create --name qwen35-9b-local \
   --source local_path --local-path /mnt/models/Qwen3.5-9B --backend vLLM --backend-version 0.25.1 \
   --replicas 1 --gpu-selector '{"gpus_per_replica": 1}' --backend-parameter "--max-model-len 8192" --dry-run
 ```
@@ -151,22 +156,22 @@ python3 scripts/gpustack.py models create --name qwen35-9b-local \
 
 ```bash
 # 1) Discover the cluster id and available backend versions
-python3 scripts/gpustack.py --json clusters list | jq -r '.items[] | "\(.id)\t\(.name)\tdefault=\(.is_default)"'
-python3 scripts/gpustack.py --json backends list | jq -r '.items[] | "\(.backend_name)\tdefault=\(.default_version)"'
+python3 ../gpustack-manager/scripts/gpustack.py --json clusters list | jq -r '.items[] | "\(.id)\t\(.name)\tdefault=\(.is_default)"'
+python3 ../gpustack-manager/scripts/gpustack.py --json backends list | jq -r '.items[] | "\(.backend_name)\tdefault=\(.default_version)"'
 
 # 2) Dry-run first, then drop --dry-run (cluster_id is auto-resolved)
-python3 scripts/gpustack.py models create --dry-run \
+python3 ../gpustack-manager/scripts/gpustack.py models create --dry-run \
   --name qwen3-8b --source huggingface --hf-repo-id Qwen/Qwen3-8B \
   --backend vLLM --replicas 1 --gpu-selector '{"gpus_per_replica": 1}' \
   --backend-parameter "--max-model-len 8192"
 
 # 3) Poll until running (pending → scheduled → downloading → starting → running)
-watch -n 10 'python3 scripts/gpustack.py --json instances list --model qwen3-8b \
+watch -n 10 'python3 ../gpustack-manager/scripts/gpustack.py --json instances list --model qwen3-8b \
   | jq -r ".items[] | \"\(.id)\t\(.state)\t\(.download_progress)%\t\(.state_message)\""'
 
 # 4) Create a model route, then smoke test (no route = invisible on /v1, see 4.6)
-python3 scripts/gpustack.py routes create --name qwen3-8b --model qwen3-8b
-python3 scripts/gpustack.py --timeout 120 chat --model qwen3-8b --prompt "1+1=?" --max-tokens 32
+python3 ../gpustack-manager/scripts/gpustack.py routes create --name qwen3-8b --model qwen3-8b
+python3 ../gpustack-manager/scripts/gpustack.py --timeout 120 chat --model qwen3-8b --prompt "1+1=?" --max-tokens 32
 ```
 
 During `downloading`, `download_progress` can read 100 while `state` stays `downloading` (state-machine lag); in `starting`, large models take 3–10 minutes to load weights — both are normal. For `local_path`, swap `--hf-repo-id` for `--local-path` (a path visible inside the worker container) and always pass `--gpu-selector`, otherwise placement is purely memory-claim driven and unstable.
@@ -174,20 +179,20 @@ During `downloading`, `download_progress` can read 100 while `state` stays `down
 ### 4.2 Scale / stop / resume
 
 ```bash
-python3 scripts/gpustack.py models scale qwen3-8b -r 2    # scale out
-python3 scripts/gpustack.py models stop qwen3-8b          # replicas=0, instances reclaimed, ports freed
-python3 scripts/gpustack.py models start qwen3-8b -r 1    # NEW instance id
-python3 scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
+python3 ../gpustack-manager/scripts/gpustack.py models scale qwen3-8b -r 2    # scale out
+python3 ../gpustack-manager/scripts/gpustack.py models stop qwen3-8b          # replicas=0, instances reclaimed, ports freed
+python3 ../gpustack-manager/scripts/gpustack.py models start qwen3-8b -r 1    # NEW instance id
+python3 ../gpustack-manager/scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
 ```
 
 ### 4.3 Instance log troubleshooting
 
 ```bash
 # Locate by model name — ids change across stop/start
-python3 scripts/gpustack.py --json instances list --model qwen3-8b \
+python3 ../gpustack-manager/scripts/gpustack.py --json instances list --model qwen3-8b \
   | jq -r '.items[] | "\(.id)\t\(.state)\t\(.worker_name)\t\(.port)"'
-python3 scripts/gpustack.py instances logs 3 | tail -n 200   # --tail counts blocks, not lines
-python3 scripts/gpustack.py instances logs 3 --follow        # Ctrl-C to exit
+python3 ../gpustack-manager/scripts/gpustack.py instances logs 3 | tail -n 200   # --tail counts blocks, not lines
+python3 ../gpustack-manager/scripts/gpustack.py instances logs 3 --follow        # Ctrl-C to exit
 ```
 
 Triage: `pending` → read `state_message` (`No suitable workers` / `Matched 0/1 workers by READY status`) — scheduling, not the model. `scheduled` but no container → worker missing `docker.sock` (Pitfall 3). `starting` for >10 min → check the log for weight loading/compilation. `running` but `/v1` errors → verify the model name and hit the instance directly.
@@ -195,9 +200,9 @@ Triage: `pending` → read `state_message` (`No suitable workers` / `Matched 0/1
 ### 4.4 Worker maintenance
 
 ```bash
-python3 scripts/gpustack.py workers maintenance 1 --enable --message "driver upgrade"
-python3 scripts/gpustack.py workers maintenance 1 --disable
-python3 scripts/gpustack.py --json workers list | jq -r '.items[] | "\(.name)\t\(.state)\tmaintenance=\(.maintenance.enabled)"'
+python3 ../gpustack-manager/scripts/gpustack.py workers maintenance 1 --enable --message "driver upgrade"
+python3 ../gpustack-manager/scripts/gpustack.py workers maintenance 1 --disable
+python3 ../gpustack-manager/scripts/gpustack.py --json workers list | jq -r '.items[] | "\(.name)\t\(.state)\tmaintenance=\(.maintenance.enabled)"'
 ```
 
 **Production-impacting**: the node stops accepting new instances and its running inference is interrupted. Check `instances list` for blast radius and get human confirmation. `--message` records the reason.
@@ -205,10 +210,10 @@ python3 scripts/gpustack.py --json workers list | jq -r '.items[] | "\(.name)\t\
 ### 4.5 Smoke tests
 
 ```bash
-python3 scripts/gpustack.py chat --model qwen3-8b --prompt "Who are you in one sentence" --max-tokens 64
-python3 scripts/gpustack.py --json chat --model qwen3-8b --prompt "hi" | jq -r '.choices[0].message.content'
-python3 scripts/gpustack.py chat --model qwen3-8b --prompt "write 3 lines" --stream
-python3 scripts/gpustack.py --json embeddings --model bge-m3 --input "hello" | jq '.data[0].embedding | length'
+python3 ../gpustack-manager/scripts/gpustack.py chat --model qwen3-8b --prompt "Who are you in one sentence" --max-tokens 64
+python3 ../gpustack-manager/scripts/gpustack.py --json chat --model qwen3-8b --prompt "hi" | jq -r '.choices[0].message.content'
+python3 ../gpustack-manager/scripts/gpustack.py chat --model qwen3-8b --prompt "write 3 lines" --stream
+python3 ../gpustack-manager/scripts/gpustack.py --json embeddings --model bge-m3 --input "hello" | jq '.data[0].embedding | length'
 ```
 
 `/v1/models` and `/v2/models` are **different sources**, and `/v1` only exposes a model that has a **model route**. Verified: with the model `1/1 ready` and its instance `running`, `/v1/models` still returned `{"data":[],"object":"list"}` and chat failed with `HTTP 404: {"error":{"message":"Model not found","code":404,"type":"NotFound"}}`. Check the instance state, then the route (see 4.6) — do not blame the model name.
@@ -219,18 +224,18 @@ Without a route the model is invisible to `/v1`: **ready ≠ inferable**. Full c
 
 ```bash
 # 1) Wait for ready: ready_replicas catches replicas, instance is running
-python3 scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
-python3 scripts/gpustack.py --json instances list --model qwen3-8b | jq -r '.items[] | "\(.id)\t\(.state)"'
+python3 ../gpustack-manager/scripts/gpustack.py --json models list | jq -r '.items[] | "\(.name)\t\(.ready_replicas)/\(.replicas)"'
+python3 ../gpustack-manager/scripts/gpustack.py --json instances list --model qwen3-8b | jq -r '.items[] | "\(.id)\t\(.state)"'
 
 # 2) Create the route (dry-run first), then verify targets + visibility on /v1
-python3 scripts/gpustack.py routes create --dry-run --name qwen3-8b --model qwen3-8b --weight 1
-python3 scripts/gpustack.py routes create --name qwen3-8b --model qwen3-8b --weight 1
-python3 scripts/gpustack.py routes get qwen3-8b      # targets / ready_targets
+python3 ../gpustack-manager/scripts/gpustack.py routes create --dry-run --name qwen3-8b --model qwen3-8b --weight 1
+python3 ../gpustack-manager/scripts/gpustack.py routes create --name qwen3-8b --model qwen3-8b --weight 1
+python3 ../gpustack-manager/scripts/gpustack.py routes get qwen3-8b      # targets / ready_targets
 curl -s -H "Authorization: Bearer $GPUSTACK_API_KEY" "$GPUSTACK_BASE_URL/v1/models" | jq -r '.data[].id'
 
 # 3) Smoke test; deleting the route removes it from /v1 immediately
-python3 scripts/gpustack.py --timeout 120 chat --model qwen3-8b --prompt "1+1=?" --max-tokens 32
-python3 scripts/gpustack.py routes delete qwen3-8b --yes
+python3 ../gpustack-manager/scripts/gpustack.py --timeout 120 chat --model qwen3-8b --prompt "1+1=?" --max-tokens 32
+python3 ../gpustack-manager/scripts/gpustack.py routes delete qwen3-8b --yes
 ```
 
 Verified 2026-10-23 on `qwen35-9b-local`: before the route `/v1/models` was empty and chat 404'd; after `POST /v2/model-routes {"name":"qwen35-9b-local","targets":[{"model_id":2,"weight":1}]}` the model appeared immediately and chat returned `tokens: prompt=17 completion=100 total=117`. Route fields: `name` / `targets` / `ready_targets` / `access_policy`; `ready_targets=0` means the target model is not ready.
@@ -238,15 +243,15 @@ Verified 2026-10-23 on `qwen35-9b-local`: before the route `/v1/models` was empt
 ### 4.7 Full inspection
 
 ```bash
-for c in clusters list models list instances list workers list gpus list; do echo "== $c"; python3 scripts/gpustack.py $c; done
-python3 scripts/gpustack.py usage summary --start-date 2026-10-20 --end-date 2026-10-23
-python3 scripts/gpustack.py --json gpus list \
+for c in clusters list models list instances list workers list gpus list; do echo "== $c"; python3 ../gpustack-manager/scripts/gpustack.py $c; done
+python3 ../gpustack-manager/scripts/gpustack.py usage summary --start-date 2026-10-20 --end-date 2026-10-23
+python3 ../gpustack-manager/scripts/gpustack.py --json gpus list \
   | jq -r '.items[] | "\(.worker_name)\t\(.index)\t\(.name)\t\((.memory.allocated/1073741824*10|floor)/10)GiB / \((.memory.total/1073741824|floor))GiB"'
 ```
 
 ## 5. Pitfalls
 
-All observed in practice, ordered by hit frequency.
+All observed in practice, ordered by hit frequency; the full list with reproduction and evidence lives in `../gpustack-manager/references/pitfalls.md`.
 
 1. **Creating a model without `cluster_id` returns 500.** Optional in the schema, but it hits `null value in column "cluster_id" ... violates not-null constraint`. The CLI auto-resolves `is_default=true` (visible in the `--dry-run` body); hand-written curl must pass it.
 2. **`local_path` must exist inside the worker container.** The default compose mounts only `/var/lib/gpustack`, so `/mnt/models` is invisible and the model sits in `scheduled` forever. Add `- /mnt/models:/mnt/models:ro` to the worker container.
@@ -268,7 +273,7 @@ All observed in practice, ordered by hit frequency.
 
 ## 6. Endpoint cheat sheet
 
-For anything the CLI does not wrap, use `raw` or curl. Auth header is always `Authorization: Bearer $GPUSTACK_API_KEY`.
+For anything the CLI does not wrap, use `raw` or curl. Auth header is always `Authorization: Bearer $GPUSTACK_API_KEY`. The full endpoint map (190 operations grouped by tag, with query parameters) is in `../gpustack-manager/references/endpoints.md`; ready-made curl recipes are in `../gpustack-manager/references/curl.md` — this table only keeps the daily-use subset.
 
 | Purpose | Method and path |
 |---|---|
@@ -284,7 +289,7 @@ For anything the CLI does not wrap, use `raw` or curl. Auth header is always `Au
 
 ```bash
 curl -s -H "Authorization: Bearer $GPUSTACK_API_KEY" "$GPUSTACK_BASE_URL/v2/model-instances" | jq -r '.items[] | "\(.id)\t\(.state)"'
-python3 scripts/gpustack.py raw GET /v2/usage/meta
+python3 ../gpustack-manager/scripts/gpustack.py raw GET /v2/usage/meta
 ```
 
 Every list endpoint the CLI covers is wrapped as `{"items":[...],"pagination":{"page":1,"perPage":100,"total":N,"totalPage":M}}`; a few exceptions exist (`/v2/gpu-instance-types` and `/v2/inference-backends/list` return `items` without `pagination`; `/v2/inference-backends/all` is a bare array) — check `items`, then `pagination`, before indexing. Errors are `{"code":<http status>,"error":{"message":...}}` with a matching HTTP status.
