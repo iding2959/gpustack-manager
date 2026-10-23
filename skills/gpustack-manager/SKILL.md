@@ -442,7 +442,7 @@ api-keys create --name app-a     --scope inference --allowed-model-names m1 m2  
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
 21. **自定义后端的镜像来自 `version_configs`，不会自动匹配公共镜像。** 解析顺序：`version_configs[backend_version].image_name` → 目标 worker 本地找不到就尝试拉取 → 拉不到则实例 `error` 并（`restart_on_error=true`）反复重试，`state_message` 带 `Failed to pull image ...`。部署前先用 `GET /v2/inference-backends/{id}` 看映射、并在目标 worker 上确认镜像；对不上就用 `--image-name` 显式覆盖。
 22. **`/v2/model-files` 的唯一键是 `(local_path, worker_id)`。** 同路径重复登记回 `409 AlreadyExists`；目标 worker 上没有该路径 → `state=error` + `Path does not exist: ...`；成功则 `state=ready` 并回填 `size`。
-23. **压测的两个硬前置：`dataset_name` 与 benchmark-runner 镜像。** 只给 profile 会 400 `Field dataset_name must be specified`；worker 上没有 `gpustack/benchmark-runner` 镜像时任务立刻 `error`（`state_message="Benchmark exited or unhealthy."`，日志里 `Failed to pull image ...`），在 worker 上 `docker pull gpustack/benchmark-runner:<tag>` 再 `docker tag` 成带 registry 前缀的名字即可。同名任务重复创建回 409。
+23. **压测的两个硬前置：`dataset_name` 与 benchmark-runner 镜像。** profile 与 dataset 要配对：`Throughput`/`Latency`/`Long Context`/`Generation Heavy` 用 `Random`（必须同时给 `--dataset-input-tokens`/`--dataset-output-tokens`），`ShareGPT` 用 `ShareGPT`（不用给 token 数，会加载真实对话数据）。 只给 profile 会 400 `Field dataset_name must be specified`；worker 上没有 `gpustack/benchmark-runner` 镜像时任务立刻 `error`（`state_message="Benchmark exited or unhealthy."`，日志里 `Failed to pull image ...`），在 worker 上 `docker pull gpustack/benchmark-runner:<tag>` 再 `docker tag` 成带 registry 前缀的名字即可。同名任务重复创建回 409。
 
 ## 6. 端点速查
 
