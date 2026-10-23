@@ -4,7 +4,7 @@ description: "GPUStack v2.2.x 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.7"
+  version: "0.1.8"
   language: zh
 ---
 
@@ -132,7 +132,7 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `my-models` | 当前 key 能看到/能调用的模型入口（`/v2/my-models`，`targets`/`ready_targets`）；`/v2/models` 被归属过滤时用它看真实部署面 | `my-models` |
 | `usage summary [--start-date D] [--end-date D]` | 用量汇总；缺省取最近 30 天 | 见 4.8 |
 | `api-keys list/get/create/delete` | key 清单与详情（只给 `masked_value`）；create 的**明文只返回一次**，delete 需 `--yes`（删完调用方立刻 401） | `api-keys create --name ci --scope inference --expires-in 86400` |
-| `benchmarks list/get/logs/create/state/delete` | 压测任务；**create 会真的打流量**，需已有实例名；`state --state stopped` 停止（需 `--yes`） | `benchmarks create --name b1 --model-instance-name <实例名> --dry-run` |
+| `benchmarks list/get/logs/create/state/delete` | 压测任务；**create 会真的打流量**，需已有实例名 + `--dataset-name`；`state --state stopped` 停止（需 `--yes`） | `benchmarks create --name b1 --model-instance-name <实例名> --dataset-name Random --total-requests 5 --dry-run` |
 | `backends list` | 推理后端与版本（`backend_name` / `default_version`） | `backends list` |
 | `routes list` / `routes get <name\|id>` | 模型路由；`/v1` 推理的前置条件（见 4.7） | `routes list` |
 | `routes create --name N --model <name\|id> [--weight W] [--dry-run]` | 建路由（把模型暴露到 `/v1`） | 见 4.7 |
@@ -384,17 +384,37 @@ python3 scripts/gpustack.py --json instances list --model <model> \
   | jq -r '.items[] | "\(.state)\t\(.worker_name)\t\(.gpu_indexes)\"'
 ```
 
-三条管理事实（实测 v2.2.1）：
-
-- 镜像名**只来自后端配置**（`version_configs[version].image_name`），不会自己去公共 registry 猜；
-- 目标 worker 本地没有该镜像时会尝试拉取，拉不到就 `error` 并（`restart_on_error=true` 时）反复重试，`state_message` 里是 `Failed to pull image ...`；
-- 自定义后端的服务由它自己的 `run_command` 启动（端口经 `{{port}}` 注入），起来后同样要建 route 才会出现在 `/v1`。
+三条管理事实（实测 v2.2.1）：镜像名只来自后端配置（`version_configs[version].image_name`）；worker 本地没有该镜像会尝试拉取，拉不到则 `error` 并（`restart_on_error`）反复重试；服务由后端自己的 `run_command` 启动（端口经 `{{port}}` 注入），起来后同样要建 route。
 
 **判定能不能部署**：`GET /v2/inference-backends/{id}` 的版本映射 + 目标 worker 的 `docker images`。两者对得上就能起；对不上不是 GPUStack 的 bug，是镜像没就位。
 
 模型文件规则（实测）：唯一键是 `(local_path, worker_id)`——同路径同 worker 重复登记回 **409 AlreadyExists**；路径在目标 worker 上不存在 → `state=error`，`state_message = Path does not exist: ...`；成功则 `state=ready` 并自动统计 `size`。
 
 收尾顺序：先删 route（对外断流）再删 model；否则调用方会先 404。
+
+### 4.11 API key 的三种维度（scope / 时效 / 模型白名单）
+
+```bash
+api-keys create --name ci-infer --scope inference --expires-in 86400   # 调用型，24h 过期
+api-keys create --name ops-mgmt  --scope management                    # 平台管理型（打 /v1 会 403）
+api-keys create --name root-key  --scope '*'                          # 全权限
+api-keys create --name custom-1  --scope inference --custom my-secret-123   # 自定义明文
+api-keys create --name app-a     --scope inference --allowed-model-names m1 m2  # 模型白名单（多选）
+```
+
+实测权限边界（v2.2.0）：
+
+| key 配置 | `/v1/*` | `/v2/*` | 备注 |
+|---|---|---|---|
+| `scope=inference` | 200 | **403** | 只做模型调用 |
+| `scope=management` | **403** | 200 | 只做平台管理 |
+| `scope=*` | 200 | 200 | 全权限 |
+| `expires_in=60` | 60s 后 **401** | - | 列表里 `expires_at` 有值 |
+| 不传 `expires_in` | 一直有效 | 一直有效 | `expires_at` 为 null |
+| `custom=<明文>` | 用它自己指定的值 | 同 scope | `is_custom=true`、`masked_value=Custom API Key` |
+| `allowed_model_names=[m1,m2]` | 模型白名单 | - | 调白名单内模型 200；调其他模型 **403 `Not allowed to access model <name>`** |
+
+注意：`allowed_model_names` 不过滤 `/v1/models` 列表（仍列全部），只在调用时拦截——别用列表判断授权。
 
 ## 5. 关键坑
 
@@ -422,6 +442,7 @@ python3 scripts/gpustack.py --json instances list --model <model> \
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
 21. **自定义后端的镜像来自 `version_configs`，不会自动匹配公共镜像。** 解析顺序：`version_configs[backend_version].image_name` → 目标 worker 本地找不到就尝试拉取 → 拉不到则实例 `error` 并（`restart_on_error=true`）反复重试，`state_message` 带 `Failed to pull image ...`。部署前先用 `GET /v2/inference-backends/{id}` 看映射、并在目标 worker 上确认镜像；对不上就用 `--image-name` 显式覆盖。
 22. **`/v2/model-files` 的唯一键是 `(local_path, worker_id)`。** 同路径重复登记回 `409 AlreadyExists`；目标 worker 上没有该路径 → `state=error` + `Path does not exist: ...`；成功则 `state=ready` 并回填 `size`。
+23. **压测的两个硬前置：`dataset_name` 与 benchmark-runner 镜像。** 只给 profile 会 400 `Field dataset_name must be specified`；worker 上没有 `gpustack/benchmark-runner` 镜像时任务立刻 `error`（`state_message="Benchmark exited or unhealthy."`，日志里 `Failed to pull image ...`），在 worker 上 `docker pull gpustack/benchmark-runner:<tag>` 再 `docker tag` 成带 registry 前缀的名字即可。同名任务重复创建回 409。
 
 ## 6. 端点速查
 

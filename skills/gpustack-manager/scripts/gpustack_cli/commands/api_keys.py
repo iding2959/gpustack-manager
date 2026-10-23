@@ -73,6 +73,9 @@ def build_api_key_payload(args: argparse.Namespace) -> Dict[str, Any]:
         payload["expires_in"] = args.expires_in
     if args.allowed_model_names:
         payload["allowed_model_names"] = args.allowed_model_names
+    # custom 是「自定义 key 明文」：传了就等于自己指定 key 值，服务端会标记 is_custom
+    if args.custom:
+        payload["custom"] = args.custom
     return payload
 
 
@@ -127,6 +130,8 @@ def register(subparsers: Any, common: argparse.ArgumentParser) -> None:
     p.add_argument("--expires-in", dest="expires_in", type=int, metavar="SECONDS", help="多少秒后过期")
     p.add_argument("--allowed-model-names", dest="allowed_model_names", nargs="+",
                    help="只允许调用这些模型（inference scope 下生效）")
+    p.add_argument("--custom", metavar="VALUE",
+                   help="自定义 key 明文（自己指定 key 值；不传则由服务端生成）")
     p.add_argument("--dry-run", action="store_true", help="只打印请求体，不提交")
     p.set_defaults(func=cmd_api_keys_create)
 
