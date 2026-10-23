@@ -426,7 +426,7 @@ OpenAPI 声明了 4 种 security scheme，且**除探针与登录类端点外，
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/v1/rerank` | 重排（`bge-reranker` 类模型用） |
+| POST | `/v1/rerank` | 重排（对接重排类模型） |
 
 ---
 
