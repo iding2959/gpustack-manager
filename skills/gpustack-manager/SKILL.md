@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.0"
+  version: "0.1.1"
   language: zh
 ---
 
@@ -111,7 +111,8 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `workers get <id\|name>` | worker 详情（字段表，含维护模式、GPU 型号、OS/内核） | `workers get 1` |
 | `workers dashboard <id\|name>` | 打印 Grafana 面板地址（302，非 JSON） | `workers dashboard 1` |
 | `gpus list [--cluster-id N]` | worker/序号/型号/显存 used-total/已分配/利用率 | `gpus list` |
-| `dashboard` | 资源计数 + CPU/内存/GPU/显存当前负载 | `dashboard` |
+| `dashboard [--cluster-id N]` | 资源计数 + CPU/内存/GPU/显存当前负载；**多集群实例必须给 `--cluster-id`**，否则服务端按「当前集群」返回全 0 | `dashboard --cluster-id 1` |
+| `my-models` | 当前 key 能看到/能调用的模型入口（`/v2/my-models`，`targets`/`ready_targets`）；`/v2/models` 被归属过滤时用它看真实部署面 | `my-models` |
 | `usage summary [--start-date D] [--end-date D]` | 用量汇总；缺省取最近 30 天 | 见 4.8 |
 | `api-keys list` | key 清单（只给 `masked_value`，不回显明文） | `api-keys list` |
 | `benchmarks list` | 压测任务 | `benchmarks list` |
@@ -341,6 +342,9 @@ python3 scripts/gpustack.py --json gpus list \
 15. **`tp × pp` 的世界大小必须等于 GPU 数。** 否则实例永远 pending，报 `selected gpu count does not match`。
 16. **`instances logs --tail` 名义上控行数，实测按"日志块"返回。** `--tail 3` 实际回了 30 行（多行块整体返回），`--tail 200` 约等于全量。要精确行数用 `instances logs <id> | tail -n N`。
 17. **列表分页默认 `perPage=100`。** 大集群要翻页：`raw GET '/v2/models?page=2&perPage=100'`。
+18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容——先用 `dashboard --cluster-id` 与 `my-models` 交叉验证。
+19. **`/v2/dashboard` 不带 `cluster_id` 可能全 0。** 该端点按"当前集群"统计，多集群实例上默认集群未必是有负载的那个；CLI 已支持 `dashboard --cluster-id N`（v2.2.3 单集群实例不带也正常）。
+20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
 
 ## 6. 端点速查
 

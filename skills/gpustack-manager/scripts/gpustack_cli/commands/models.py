@@ -56,6 +56,12 @@ def cmd_models_list(cfg: Config, args: argparse.Namespace) -> int:
     print_table(["ID", "名称", "副本(ready/total)", "后端", "来源", "状态"], rows)
     if rows:
         print(f"\n共 {len(rows)} 个模型。")
+    else:
+        # 列表按 principal 归属过滤：多用户实例上用非 owner 的 key 会全空，集群聚合却仍有数据
+        print(
+            "提示：/v2/models 按 principal 归属过滤。若集群确实有模型，用 "
+            "`dashboard --cluster-id <id>` 看聚合计数、`my-models` 看当前 key 能调用的模型入口。"
+        )
     return EXIT_OK
 
 

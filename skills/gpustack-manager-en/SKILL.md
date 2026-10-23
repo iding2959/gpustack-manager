@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 cluster operations and inference-service managemen
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.0"
+  version: "0.1.1"
   language: en
 ---
 
@@ -82,7 +82,8 @@ Auth header is always `Authorization: Bearer <key>`; missing or wrong key yields
 | `workers get <id\|name>` | Field table incl. maintenance flag, GPU model, OS/kernel | `workers get 1` |
 | `workers dashboard <id\|name>` | Prints the Grafana URL (302, not JSON) | `workers dashboard 1` |
 | `gpus list [--cluster-id N]` | worker/index/model/vram used-total/allocated/utilization | `gpus list` |
-| `dashboard` | Resource counts + current CPU/RAM/GPU/VRAM load | `dashboard` |
+| `dashboard [--cluster-id N]` | Resource counts + current CPU/RAM/GPU/VRAM load; **pass `--cluster-id` on multi-cluster instances**, otherwise the server reports zeros for the "current" cluster | `dashboard --cluster-id 1` |
+| `my-models` | Model entries this key can call (`/v2/my-models`, with `targets`/`ready_targets`) — use it when `/v2/models` is ownership-filtered | `my-models` |
 | `usage summary [--start-date D] [--end-date D]` | Usage totals; defaults to the last 30 days | see 4.7 |
 | `api-keys list` | Keys as `masked_value` only | `api-keys list` |
 | `benchmarks list` | Stored benchmarks | `benchmarks list` |

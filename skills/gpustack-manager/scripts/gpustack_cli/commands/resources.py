@@ -131,8 +131,37 @@ def cmd_clusters_list(cfg: Config, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_my_models(cfg: Config, args: argparse.Namespace) -> int:
+    """/v2/my-models 是「当前 key 能看到/能调用」的模型入口（ModelRoute/ModelAccess）。
+
+    /v2/models 按 principal 归属过滤，多用户实例上用别人的 key 会全空；此时靠这个命令
+    与 dashboard 的聚合计数还原真实部署情况。
+    """
+    payload, items = fetch_list(cfg, "/v2/my-models")
+    items = sort_items(items)
+    if args.json:
+        dump_json(json_list_payload(payload, items))
+        return EXIT_OK
+    rows = [
+        [
+            item.get("id"),
+            item.get("name"),
+            item.get("targets"),
+            item.get("ready_targets"),
+            item.get("access_policy"),
+            item.get("owner_principal_id"),
+        ]
+        for item in items
+    ]
+    print_table(["ID", "名称", "targets", "ready", "访问策略", "owner"], rows)
+    if rows:
+        print(f"\n共 {len(rows)} 个模型入口（ready 是就绪目标数，0 表示目标模型没起来）。")
+    return EXIT_OK
+
+
 def cmd_dashboard(cfg: Config, args: argparse.Namespace) -> int:
-    payload = get_json(cfg, "/v2/dashboard")
+    # 多集群实例上不带 cluster_id 会拿到全 0（服务端按「当前集群」算，而当前集群可能不是有负载的那个）
+    payload = get_json(cfg, "/v2/dashboard", params={"cluster_id": getattr(args, "cluster_id", None)})
     if args.json:
         dump_json(payload)
         return EXIT_OK
@@ -290,7 +319,11 @@ def register(subparsers: Any, common: argparse.ArgumentParser) -> None:
     p = add_sub(clusters_sub, "list", "列出集群", common)
     p.set_defaults(func=cmd_clusters_list)
 
+    p = add_sub(subparsers, "my-models", "当前 key 可见的模型入口（/v1 能调用的那一批）", common)
+    p.set_defaults(func=cmd_my_models)
+
     p = add_sub(subparsers, "dashboard", "集群概览（资源统计 + 当前负载）", common)
+    p.add_argument("--cluster-id", type=int, help="按集群统计（多集群实例必须给，否则服务端按当前集群返回全 0）")
     p.set_defaults(func=cmd_dashboard)
 
     # usage

@@ -141,4 +141,18 @@ OpenAPI 里这些端点的 `responses.200` 声明的是 JSON，**与实际不符
 
 ---
 
-**统计**：本文件覆盖 20 条坑（§5.1–§5.20），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
+### 5.21 列表按 principal 归属过滤，聚合计数不受影响
+
+多用户/多组织实例上（v2.2.0 实测，`users/me` 返回 `admin / is_admin=true`）：`GET /v2/models`、`GET /v2/model-instances`、`GET /v2/model-routes` 全部 `total=0`，但同一集群 `GET /v2/dashboard?cluster_id=1` 返回 `model_count:24 / model_instance_count:23`，`GET /v2/my-models` 返回 26 条（`owner_principal_id:7`）。加 `x-organization-id` 换 org 也一样空。`[实测]`
+
+判读：列表是「归属给我（owner）」的集合，聚合是集群级统计。**不要因为 `/v2/models` 空就判断没有模型**，用 `dashboard --cluster-id <id>` + `my-models` 交叉验证；`my-models` 的 `ready_targets/targets` 就是对外可用度。
+
+### 5.22 `/v2/dashboard` 不带 `cluster_id` 可能全 0
+
+该端点按「当前集群」统计，多集群实例上默认集群未必是有负载的那个（实测 3 集群实例上不带参数返回全 0，带 `cluster_id=1` 才拿到 3 worker / 20 GPU / 24 模型 / 23 实例）。CLI 提供 `dashboard --cluster-id N`。`[实测]`
+
+### 5.23 v2.2.0 与 v2.2.3 的管理面基本一致
+
+实测两版 OpenAPI：2.2.0 = 131 path，2.2.3 = 133 path，差异仅 `/auth/cas/login`、`/auth/cas/callback`，`/v2/models`、`/v2/dashboard` 的查询参数完全相同。同一套 CLI 可同时打两版，版本问题优先怀疑数据/权限，而不是接口不兼容。`[实测]`
+
+**统计**：本文件覆盖 23 条坑（§5.1–§5.23），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
