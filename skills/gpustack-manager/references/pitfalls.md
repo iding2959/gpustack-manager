@@ -141,11 +141,17 @@ OpenAPI 里这些端点的 `responses.200` 声明的是 JSON，**与实际不符
 
 ---
 
-### 5.21 列表按 principal 归属过滤，聚合计数不受影响
+### 5.21 `/v2/models` 只返回「归属当前 principal」的行，admin 也不例外
 
-多用户/多组织实例上（v2.2.0 实测，`users/me` 返回 `admin / is_admin=true`）：`GET /v2/models`、`GET /v2/model-instances`、`GET /v2/model-routes` 全部 `total=0`，但同一集群 `GET /v2/dashboard?cluster_id=1` 返回 `model_count:24 / model_instance_count:23`，`GET /v2/my-models` 返回 26 条（`owner_principal_id:7`）。加 `x-organization-id` 换 org 也一样空。`[实测]`
+v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_principal_id` 都是 1）：
 
-判读：列表是「归属给我（owner）」的集合，聚合是集群级统计。**不要因为 `/v2/models` 空就判断没有模型**，用 `dashboard --cluster-id <id>` + `my-models` 交叉验证；`my-models` 的 `ready_targets/targets` 就是对外可用度。
+- 用该 key 新建一个 `replicas=0` 的模型 → **立刻出现在 `/v2/models`**（id=35，`owner_principal_id=1`），删掉即消失。
+- 同一集群里另有 24 个模型（`dashboard?cluster_id=1` 的 `model_count`），`GET /v2/models/{id}` 扫 id 1..40 **除自己那条外全部 404**；`/v2/models` 无论加 `cluster_id`、`x-organization-id`（1..8）、`owner_principal_id`、`all=true` 都是 `total=0`。
+- 这些模型在 `GET /v2/my-models` 里可见（26 条，`owner_principal_id=7`），`targets/ready_targets` 正常，`/v1` 调用正常。
+
+结论：列表与详情都按 **owner principal 相等** 过滤，`is_admin=true` **不会**绕过；`owner_principal_id=7` 是另一类 principal（组织/system 级）持有的历史数据。加 org 头无效。`[实测]`
+
+绕开方式：`dashboard --cluster-id <id>` 看聚合计数、`my-models` 看对外入口（含就绪度）、`model-files` 看文件清单；要按 owner 视角看全部 Model 定义，得拿 owner principal 对应的凭据，或直接在服务端查库（`models` 表按 `owner_principal_id` 分组）。
 
 ### 5.22 `/v2/dashboard` 不带 `cluster_id` 可能全 0
 
