@@ -137,7 +137,7 @@ python3 skills/gpustack-manager/scripts/gpustack.py raw GET /v2/model-instances 
 | `instances list/logs` | 实例状态与流式日志 |
 | `workers list/get/maintenance/dashboard` | worker 管理（维护模式影响调度） |
 | `gpus list` | GPU 设备与显存 |
-| `model-files list/create/delete` | 模型文件（下载任务、本地目录登记） |
+| `model-files list/get/create/delete` | 模型文件（下载任务、本地目录登记、详情含 state_message；delete 需 `--yes`） |
 | `clusters list/get` | 集群 |
 | `dashboard` | 资源统计与当前负载 |
 | `usage summary` | 用量（必须带 `--start-date/--end-date`） |

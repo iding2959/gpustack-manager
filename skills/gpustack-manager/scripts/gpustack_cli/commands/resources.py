@@ -1,4 +1,4 @@
-"""资源与健康类命令：health / gpus / model-files / clusters / dashboard / usage /
+"""资源与健康类命令：health / gpus / clusters / dashboard / usage /
 api-keys / backends / benchmarks。
 
 这些命令都是「看」为主，共用同一套列表翻页、表格与单位换算逻辑。
@@ -78,30 +78,6 @@ def cmd_gpus_list(cfg: Config, args: argparse.Namespace) -> int:
     print_table(["worker", "序号", "型号", "显存 used/total", "已分配", "利用率"], rows)
     if rows:
         print(f"\n共 {len(rows)} 张 GPU。")
-    return EXIT_OK
-
-
-def cmd_model_files_list(cfg: Config, args: argparse.Namespace) -> int:
-    payload, items = fetch_list(cfg, "/v2/model-files")
-    items = sort_items(items)
-    if args.json:
-        dump_json(json_list_payload(payload, items))
-        return EXIT_OK
-    rows = [
-        [
-            item.get("id"),
-            item.get("source"),
-            source_label(item),
-            item.get("state"),
-            pct(item.get("download_progress")),
-            human_bytes(item.get("size")),
-            item.get("worker_id"),
-        ]
-        for item in items
-    ]
-    print_table(["ID", "来源", "名称", "状态", "进度", "大小", "worker"], rows)
-    if rows:
-        print(f"\n共 {len(rows)} 个模型文件。")
     return EXIT_OK
 
 
@@ -299,19 +275,13 @@ def register_health(subparsers: Any, common: argparse.ArgumentParser) -> None:
 
 
 def register(subparsers: Any, common: argparse.ArgumentParser) -> None:
-    """注册 gpus/model-files/clusters/dashboard/usage/api-keys/benchmarks/backends。"""
+    """注册 gpus/clusters/dashboard/usage/api-keys/benchmarks/backends。"""
     # gpus
     p_gpus = add_sub(subparsers, "gpus", "GPU 设备", common)
     gpus_sub = p_gpus.add_subparsers(dest="action", metavar="<操作>", required=True)
     p = add_sub(gpus_sub, "list", "列出 GPU 设备", common)
     p.add_argument("--cluster-id", type=int, help="按集群过滤")
     p.set_defaults(func=cmd_gpus_list)
-
-    # model-files
-    p_files = add_sub(subparsers, "model-files", "模型文件/下载任务", common)
-    files_sub = p_files.add_subparsers(dest="action", metavar="<操作>", required=True)
-    p = add_sub(files_sub, "list", "列出模型文件与下载进度", common)
-    p.set_defaults(func=cmd_model_files_list)
 
     # clusters
     p_clusters = add_sub(subparsers, "clusters", "集群", common)

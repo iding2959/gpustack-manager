@@ -4,7 +4,7 @@ description: "GPUStack v2.2.x 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.5"
+  version: "0.1.6"
   language: zh
 ---
 
@@ -137,7 +137,7 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `routes list` / `routes get <name\|id>` | 模型路由；`/v1` 推理的前置条件（见 4.7） | `routes list` |
 | `routes create --name N --model <name\|id> [--weight W] [--dry-run]` | 建路由（把模型暴露到 `/v1`） | 见 4.7 |
 | `routes delete <name\|id> --yes` | 删路由（模型立即从 `/v1` 消失） | `routes delete qwen3-8b --yes` |
-| `model-files list` | 模型下载任务与进度 | `model-files list` |
+| `model-files list/get/create/delete` | 模型文件登记、下载进度、详情（含 `state_message`）、删除（需 `--yes`） | `model-files create --source local_path --local-path /mnt/models/<dir> --worker-id 4` |
 
 ### 3.2 模型生命周期
 
@@ -355,10 +355,10 @@ python3 scripts/gpustack.py --json instances list --model probe-pin \
   | jq -r '.items[] | "\(.state)\t\(.worker_name)\t\(.gpu_indexes)"'
 
 # 4) 登记模型文件（按 worker 维度去重；路径不存在会 state=error）
-python3 scripts/gpustack.py raw POST /v2/model-files \
-  --data '{"source":"local_path","local_path":"/mnt/models/<dir>","worker_id":<worker_id>}'
-python3 scripts/gpustack.py --json model-files list \
-  | jq -r '.items[] | "\(.id)\t\(.worker_id)\t\(.state)\t\(.size)\t\(.local_path)"'
+python3 scripts/gpustack.py model-files create --source local_path \
+  --local-path /mnt/models/<dir> --worker-id <worker_id>
+python3 scripts/gpustack.py model-files get <id>        # 看 state / state_message / size
+python3 scripts/gpustack.py model-files delete <id> --yes
 ```
 
 ### 4.10 自定义后端（自建镜像）

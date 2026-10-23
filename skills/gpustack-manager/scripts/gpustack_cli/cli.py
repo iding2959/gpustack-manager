@@ -7,7 +7,16 @@ build_parser 只负责「按顺序调用各命令模块的 register()」，具�
 import argparse
 from typing import List, Sequence
 
-from .commands import inference, instances, models, raw, resources, routes, workers
+from .commands import (
+    inference,
+    instances,
+    model_files,
+    models,
+    raw,
+    resources,
+    routes,
+    workers,
+)
 from .config import DEFAULT_BASE_URL, DEFAULT_CONFIG_PATH, DEFAULT_TIMEOUT
 
 
@@ -142,6 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     models.register(subparsers, common)
     instances.register(subparsers, common)
     workers.register(subparsers, common)
+    model_files.register(subparsers, common)
     resources.register(subparsers, common)
     routes.register(subparsers, common)
     inference.register(subparsers, common)
