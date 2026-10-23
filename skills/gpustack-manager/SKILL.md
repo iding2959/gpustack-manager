@@ -4,7 +4,7 @@ description: "GPUStack v2.2.3 集群运维与推理服务管理指南：查询�
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.2"
+  version: "0.1.3"
   language: zh
 ---
 
@@ -184,7 +184,7 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `--backend NAME` | 后端**显示名**：`vLLM` / `SGLang` / `MindIE` / `VoxBox`（来自 `backends list`） |
 | `--backend-version VER` | 如 `0.25.1`；不传取 `default_version` |
 | `--replicas N` | 副本数，默认 1；可为 0（只建定义不起实例） |
-| `--gpu-selector JSON` | v2.2.3 形如 `'{"gpus_per_replica": 1}'` 或 `'{"gpu_ids": ["<worker>:cuda:0"]}'`，见第 5 章第 11 条 |
+| `--gpu-selector JSON` | 指定卡：`'{"gpu_ids":["<worker>:cuda:<idx>"]}'`（id 取自 `gpus list --json`）；只指定数量：`'{"gpus_per_replica": 1}'`。实测按 gpu_ids 部署后实例 `gpu_indexes` 就是指定的那张卡 |
 | `--backend-parameter "--flag value"` | 可重复；一次给 flag 与值（内部按 shell 词法拆分） |
 | `--cluster-id N` | 不传自动取 `is_default=true` 的集群 |
 | `--dry-run` | 只打印将要提交的请求体，不发请求（部署前必用） |
@@ -334,6 +334,33 @@ python3 scripts/gpustack.py --json gpus list \
   | jq -r '.items[] | "\(.worker_name)\t\(.index)\t\(.name)\t\((.memory.allocated/1073741824*10|floor)/10)GiB / \((.memory.total/1073741824|floor))GiB"'
 ```
 
+### 4.9 指定某张卡部署 / 登记模型文件
+
+```bash
+# 1) 找出空闲卡（allocated=0 且利用率低）
+python3 scripts/gpustack.py --json gpus list \
+  | jq -r '.items[] | select(.memory.allocated==0) | "\(.id)\t\(.name)\t\(.memory.used)"'
+
+# 2) 用 gpu_ids 把模型钉到指定卡（实测：实例 gpu_indexes 就是这张卡）
+python3 scripts/gpustack.py models create --name probe-pin \
+  --source local_path --local-path /mnt/models/bge-m3 --backend vLLM \
+  --gpu-selector '{"gpu_ids":["gpu-worker-206:cuda:4"]}' --replicas 1
+
+# 3) 核对落点：worker_name + gpu_indexes
+python3 scripts/gpustack.py --json instances list --model probe-pin \
+  | jq -r '.items[] | "\(.state)\t\(.worker_name)\t\(.gpu_indexes)"'
+
+# 4) 登记模型文件（按 worker 维度去重；路径不存在会 state=error）
+python3 scripts/gpustack.py raw POST /v2/model-files \
+  --data '{"source":"local_path","local_path":"/mnt/models/bge-m3","worker_id":4}'
+python3 scripts/gpustack.py --json model-files list \
+  | jq -r '.items[] | "\(.id)\t\(.worker_id)\t\(.state)\t\(.size)\t\(.local_path)"'
+```
+
+模型文件规则（实测）：唯一键是 `(local_path, worker_id)`——同路径同 worker 重复登记回 **409 AlreadyExists**；路径在目标 worker 上不存在 → `state=error`，`state_message = Path does not exist: ...`；成功则 `state=ready` 并自动统计 `size`。
+
+收尾顺序：先删 route（对外断流）再删 model；否则调用方会先 404。
+
 ## 5. 关键坑
 
 全部来自实测，按踩到频率排序；完整清单、复现命令与证据在 `references/pitfalls.md`。
@@ -358,6 +385,8 @@ python3 scripts/gpustack.py --json gpus list \
 18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响；改用账号密码可绕过。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容。实测同一实例用 `--username admin --password ...` 换会话后，`/v2/models` 立刻返回全部 24 条、`instances list` 也正常——所以**优先用账号密码**，API key 只作备选。
 19. **`/v2/dashboard` 不带 `cluster_id` 可能全 0。** 该端点按"当前集群"统计，多集群实例上默认集群未必是有负载的那个；CLI 已支持 `dashboard --cluster-id N`（v2.2.3 单集群实例不带也正常）。
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
+21. **自定义后端按 `backend_version` 拼镜像名，registry 里没有就 404。** 实测 v2.2.1 上用 `--backend bge-custom --backend-version bge-m3-v1.1.0` 部署，worker 报 `Failed to pull image docker.1ms.run/bge-m3:v1.1.0: not found`，实例反复 `error`（`restart_on_error` 会一直重试）。自带 vLLM/SGLang 后端不会踩；要用自定义后端先在目标 worker 上确认镜像存在。
+22. **`/v2/model-files` 的唯一键是 `(local_path, worker_id)`。** 同路径重复登记回 `409 AlreadyExists`；目标 worker 上没有该路径 → `state=error` + `Path does not exist: ...`；成功则 `state=ready` 并回填 `size`。
 
 ## 6. 端点速查
 

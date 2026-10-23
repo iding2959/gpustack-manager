@@ -165,4 +165,16 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 实测两版 OpenAPI：2.2.0 = 131 path，2.2.3 = 133 path，差异仅 `/auth/cas/login`、`/auth/cas/callback`，`/v2/models`、`/v2/dashboard` 的查询参数完全相同。同一套 CLI 可同时打两版，版本问题优先怀疑数据/权限，而不是接口不兼容。`[实测]`
 
-**统计**：本文件覆盖 23 条坑（§5.1–§5.23），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
+### 5.24 自定义后端的镜像名由 backend_version 决定
+
+实测 v2.2.1：`backend=bge-custom` + `backend_version=bge-m3-v1.1.0` → worker 解析镜像为 `docker.1ms.run/bge-m3:v1.1.0`，该 registry 下无此 tag，报 `Failed to pull image ... not found`，实例在 `starting`/`error` 之间反复重试（`restart_on_error=true`）。同样内容改用 `backend=vLLM` 部署成功。结论：用自定义后端前，先在目标 worker 上确认镜像存在；不确定就用内置后端。`[实测]`
+
+### 5.25 模型文件登记的唯一键与失败态
+
+`POST /v2/model-files` 的 `(local_path, worker_id)` 是唯一键：同路径同 worker → `409 AlreadyExists`；同路径换 worker → 允许；目标 worker 上路径不存在 → `state=error`、`state_message="Path does not exist: /mnt/models/xxx"`；成功 → `state=ready` 且自动回填 `size`（例：/mnt/models/bge-m3 = 4587311867 字节）。`[实测]`
+
+### 5.26 指定卡部署的写法与核对
+
+`gpu_selector={"gpu_ids":["gpu-worker-206:cuda:4"]}`（id 来自 `GET /v2/gpu-devices` 的 `id`）能精确钉卡：实测实例落到 `worker_name=gpu-worker-206`、`gpu_indexes=[4]`，跑完删除后该卡 `used` 立即回落到基线、无残留容器。只写 `gpus_per_replica` 则是“要一张卡”，具体哪张由调度决定。`[实测]`
+
+**统计**：本文件覆盖 26 条坑（§5.1–§5.26），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
