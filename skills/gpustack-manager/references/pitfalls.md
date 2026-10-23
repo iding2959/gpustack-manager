@@ -165,9 +165,11 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 实测两版 OpenAPI：2.2.0 = 131 path，2.2.3 = 133 path，差异仅 `/auth/cas/login`、`/auth/cas/callback`，`/v2/models`、`/v2/dashboard` 的查询参数完全相同。同一套 CLI 可同时打两版，版本问题优先怀疑数据/权限，而不是接口不兼容。`[实测]`
 
-### 5.24 自定义后端的镜像名由 backend_version 决定
+### 5.24 自定义后端的镜像是「配置决定」，不是自动匹配
 
-实测 v2.2.1：`backend=bge-custom` + `backend_version=bge-m3-v1.1.0` → worker 解析镜像为 `docker.1ms.run/bge-m3:v1.1.0`，该 registry 下无此 tag，报 `Failed to pull image ... not found`，实例在 `starting`/`error` 之间反复重试（`restart_on_error=true`）。同样内容改用 `backend=vLLM` 部署成功。结论：用自定义后端前，先在目标 worker 上确认镜像存在；不确定就用内置后端。`[实测]`
+自定义后端（`backend_name` 自定）的镜像全部来自后端配置：`GET /v2/inference-backends/{id}` 的 `version_configs[version].image_name`，部署时 `--backend/--backend-version` 命中哪一项就用哪个镜像。`[openapi]` `[实测]`
+
+失败路径：目标 worker 本地没有该镜像 → 尝试从默认 registry 拉取 → 拉不到则实例 `error`，且 `restart_on_error=true` 时会反复重试，`state_message` 为 `Failed to pull image <registry>/<image>`。排障顺序：① 看 `version_configs` 里这个版本到底指向哪个镜像；② 到目标 worker `docker images` 确认；③ 都对不上就用 `--image-name` 显式指定。`[实测]`
 
 ### 5.25 模型文件登记的唯一键与失败态
 
@@ -177,8 +179,4 @@ v2.2.0 实测（实例只有 1 个用户 `admin`、所有 API key 的 `owner_pri
 
 `gpu_selector={"gpu_ids":["gpu-worker-206:cuda:4"]}`（id 来自 `GET /v2/gpu-devices` 的 `id`）能精确钉卡：实测实例落到 `worker_name=gpu-worker-206`、`gpu_indexes=[4]`，跑完删除后该卡 `used` 立即回落到基线、无残留容器。只写 `gpus_per_replica` 则是“要一张卡”，具体哪张由调度决定。`[实测]`
 
-### 5.27 自定义后端的响应结构可能不是 OpenAI 形状
-
-`bge-custom` 的 `/v1/embeddings` 返回 `{"data":[{"index":0,"dense":[...]}]}`，向量在 **`dense`** 而不是 OpenAI 的 `embedding`；`visual-embedding-custom` 同理有自己的形状。CLI 的 `embeddings` 先取 `embedding`、再退 `dense`/`vector`，都没有会把 `data[0]` 的键名打出来。断言维度前先 `--json` 看一眼原始结构。`[实测]`
-
-**统计**：本文件覆盖 27 条坑（§5.1–§5.27），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。
+**统计**：本文件覆盖 26 条坑（§5.1–§5.26），其中 §5.19（ModelRoute 决定 `/v1` 可见性）与 §5.20（PUT 定位字段）是上线前最容易踩、排查成本最高的两条。

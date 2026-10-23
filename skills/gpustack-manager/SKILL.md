@@ -1,16 +1,20 @@
 ---
 name: gpustack-manager
-description: "GPUStack v2.2.3 集群运维与推理服务管理指南：查询集群/worker/GPU 资源，部署模型（HuggingFace、ModelScope、本地路径），启动/停止/扩缩容，查实例状态与日志排障，worker 维护模式，OpenAI 兼容接口冒烟测试，以及 REST 端点速查。当用户提到 GPUStack、模型部署、启动/停止模型、扩缩容、实例日志排障、worker 维护、GPU 资源、推理冒烟测试、gpustack API 时加载。"
+description: "GPUStack v2.2.x 集群运维与推理服务管理指南：查询集群/worker/GPU 资源，部署模型（HuggingFace、ModelScope、本地路径），启动/停止/扩缩容，查实例状态与日志排障，worker 维护模式，OpenAI 兼容接口冒烟测试，以及 REST 端点速查。当用户提到 GPUStack、模型部署、启动/停止模型、扩缩容、实例日志排障、worker 维护、GPU 资源、推理冒烟测试、gpustack API 时加载。"
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.4"
+  version: "0.1.5"
   language: zh
 ---
 
 # GPUStack 管理器
 
-面向 GPUStack v2.2.3 的运维 skill。所有命令、输出示例与结论均在真实实例（Docker provider、NVIDIA L40 48GB）上跑过核对，不是照 OpenAPI schema 猜的。
+面向 GPUStack v2.2.x 的**管理面**运维 skill：集群/worker/GPU、模型定义与副本、实例与日志、模型路由、推理后端配置、模型文件、用量与 API key。
+
+边界说明：只写 GPUStack 自己怎么管事，不写模型服务内部的实现细节（某个推理服务器的返回字段长什么样、某个镜像里装了什么）———那属于模型/镜像自身的问题，不是 GPUStack 管理操作。
+
+所有命令、输出示例与结论均在真实实例（v2.2.0 / v2.2.1 / v2.2.3，Docker provider，NVIDIA L40 / A6000）上跑过核对，不是照 OpenAPI schema 猜的。
 
 CLI 就在本 skill 目录里：入口 `scripts/gpustack.py`，实现在同目录的 `scripts/gpustack_cli/` 包（入口只做导入与分发；Python 3.9+，**仅标准库**，零安装）。安装后路径为 `<agent skills 目录>/gpustack-manager/scripts/gpustack.py`；下文命令都以 **skill 目录为工作目录**，先 `cd` 进去再执行（`python3 scripts/gpustack.py …`）。
 
@@ -168,7 +172,7 @@ python3 scripts/gpustack.py workers list --json --base-url http://192.168.0.202
 | `instances list [--model M] [--state S]` | ID/模型/状态/worker/IP/端口/PID | `instances list --model qwen35-9b-local` |
 | `instances logs <id> [--tail N] [--follow]` | 实例日志；`<id>` **必须是数字** | `instances logs 3 --tail 200` |
 | `chat --model M --prompt P [...]` | POST /v1/chat/completions 冒烟 | 见 4.6 |
-| `embeddings --model M --input I` | POST /v1/embeddings | `embeddings --model bge-m3 --input hello` |
+| `embeddings --model M --input I` | POST /v1/embeddings | `embeddings --model <embedding-model> --input hello` |
 | `raw <METHOD> <PATH> [--data JSON\|@file]` | 逃生口，任意端点 | `raw GET /v2/usage/meta` |
 
 `chat` 可选：`--system S`、`--temperature T`、`--max-tokens N`、`--stream`。默认打印回复正文 + `tokens: prompt=… completion=… total=…`；`--json` 打印完整响应（可 `.choices[0].message.content`）。`--stream` 与 `--json` 同时给时以 `--json` 优先。
@@ -291,7 +295,7 @@ python3 scripts/gpustack.py --json workers list \
 python3 scripts/gpustack.py chat --model qwen3-8b --prompt "用一句话说明你是谁" --max-tokens 64
 python3 scripts/gpustack.py --json chat --model qwen3-8b --prompt "hi" | jq -r '.choices[0].message.content'
 python3 scripts/gpustack.py chat --model qwen3-8b --prompt "写三行诗" --stream
-python3 scripts/gpustack.py --json embeddings --model bge-m3 --input "hello" | jq '.data[0].embedding | length'
+python3 scripts/gpustack.py --json embeddings --model <embedding-model> --input "hello" | jq '.data[0].embedding | length'
 ```
 
 冒烟前先确认两件事：`/v1/models` 与 `/v2/models` **不是同一数据源**；而且 `/v1` 只有在该模型存在 **model route** 时才暴露。实测模型 `1/1 ready`、实例 `running`，但没建路由时 `/v1/models` 仍返回 `{"data":[],"object":"list"}`，`chat` 报 `HTTP 404: {"error":{"message":"Model not found","code":404,"type":"NotFound"}}`——先查实例状态，再查路由（见 4.7），别以为模型名写错。
@@ -357,33 +361,36 @@ python3 scripts/gpustack.py --json model-files list \
   | jq -r '.items[] | "\(.id)\t\(.worker_id)\t\(.state)\t\(.size)\t\(.local_path)"'
 ```
 
-### 4.10 用「自定义后端」部署（bge / visual-embedding 等非 vLLM/SGLang）
+### 4.10 自定义后端（自建镜像）
 
-自定义后端不是 CLI 特例，就是 `--backend <backend_name> --backend-version <version>`，关键是**先把镜像找对、把卡选对**：
+GPUStack 允许把自建镜像注册成后端（`backend_name` 是自定义名，如 `xxx-custom`）。管理面只关心三件事：**版本→镜像映射、镜像在不在目标 worker 上、跑起来落在哪张卡**。
 
 ```bash
-# 1) 看自定义后端定义了哪些版本、每个版本用哪个镜像
-python3 scripts/gpustack.py --json raw GET /v2/inference-backends | \
-  jq -r '.items[] | select(.backend_name|test("custom")) | "\(.id)\t\(.backend_name)\t\(.version_configs|keys|join(","))"'
-python3 scripts/gpustack.py raw GET /v2/inference-backends/12      # 看 version_configs: version -> image_name
+# 1) 有哪些自定义后端、每个版本对应哪个镜像
+python3 scripts/gpustack.py --json raw GET /v2/inference-backends \
+  | jq -r '.items[] | "\(.id)\t\(.backend_name)\t\(.version_configs|keys|join(","))"'
+python3 scripts/gpustack.py --json raw GET /v2/inference-backends/<id> \
+  | jq -r '.version_configs | to_entries[] | "\(.key)\t\(.value.image_name)\t\(.value.run_command)"'
 
-# 2) 确认目标 worker 上已有该镜像（自定义镜像通常不在公共 registry 里）
-#    实测：镜像只存在于跑着同类模型的 worker 上；换一台没镜像的 worker 会 Failed to pull image ... not found
-ssh <worker> "docker images | grep -E 'bge-m3|face-embedding|normal-embedding'"
+# 2) 部署：--backend 传 backend_name，--backend-version 传 version_configs 的 key
+#    映射里没有的镜像名，用 --image-name 覆盖
+python3 scripts/gpustack.py models create --name <model> \
+  --source local_path --local-path /mnt/models/<dir> \
+  --backend <backend_name> --backend-version <version> \
+  --gpu-selector '{"gpu_ids":["<worker>:cuda:<idx>"]}' --replicas 1
 
-# 3) 钉到那台的某张空闲卡部署
-python3 scripts/gpustack.py models create --name probe-bge \
-  --source local_path --local-path /mnt/models/bge-m3 \
-  --backend bge-custom --backend-version bge-m3-v1.1.0 \
-  --gpu-selector '{"gpu_ids":["gpu-worker-207:cuda:3"]}' --replicas 1
-
-# 4) 核对：实例 running + gpu_indexes 是目标卡；再建 route 冒烟
-python3 scripts/gpustack.py --json instances list --model probe-bge | jq -r '.items[]|"\(.state)\t\(.worker_name)\t\(.gpu_indexes)"'
-python3 scripts/gpustack.py routes create --name probe-bge --model probe-bge
-python3 scripts/gpustack.py embeddings --model probe-bge --input "hello"
+# 3) 核对落点与状态
+python3 scripts/gpustack.py --json instances list --model <model> \
+  | jq -r '.items[] | "\(.state)\t\(.worker_name)\t\(.gpu_indexes)\"'
 ```
 
-实测（v2.2.1）：`bge-custom` + `bge-m3-v1.1.0` 钉到 `gpu-worker-207:cuda:3`，30 秒 `running`，容器内日志 `Loading BGE-M3 model ... Model loaded successfully!`，embeddings 返回 **1024 维**（注意字段名是 `data[].dense`，不是 OpenAI 的 `data[].embedding`；CLI 已兼容两者）。
+三条管理事实（实测 v2.2.1）：
+
+- 镜像名**只来自后端配置**（`version_configs[version].image_name`），不会自己去公共 registry 猜；
+- 目标 worker 本地没有该镜像时会尝试拉取，拉不到就 `error` 并（`restart_on_error=true` 时）反复重试，`state_message` 里是 `Failed to pull image ...`；
+- 自定义后端的服务由它自己的 `run_command` 启动（端口经 `{{port}}` 注入），起来后同样要建 route 才会出现在 `/v1`。
+
+**判定能不能部署**：`GET /v2/inference-backends/{id}` 的版本映射 + 目标 worker 的 `docker images`。两者对得上就能起；对不上不是 GPUStack 的 bug，是镜像没就位。
 
 模型文件规则（实测）：唯一键是 `(local_path, worker_id)`——同路径同 worker 重复登记回 **409 AlreadyExists**；路径在目标 worker 上不存在 → `state=error`，`state_message = Path does not exist: ...`；成功则 `state=ready` 并自动统计 `size`。
 
@@ -413,7 +420,7 @@ python3 scripts/gpustack.py embeddings --model probe-bge --input "hello"
 18. **`/v2/models` 等列表按 principal 归属过滤，聚合计数却不受影响；改用账号密码可绕过。** 多用户/多组织实例上（v2.2.0 实测），用非资源 owner 的 key 调 `/v2/models`、`/v2/model-instances` 会返回 `total=0`，而同集群 `dashboard?cluster_id=1` 仍是 `模型 24 / 实例 23`、`/v2/my-models` 有 26 条。别把这当成"没有模型"或 API 版本不兼容。实测同一实例用 `--username admin --password ...` 换会话后，`/v2/models` 立刻返回全部 24 条、`instances list` 也正常——所以**优先用账号密码**，API key 只作备选。
 19. **`/v2/dashboard` 不带 `cluster_id` 可能全 0。** 该端点按"当前集群"统计，多集群实例上默认集群未必是有负载的那个；CLI 已支持 `dashboard --cluster-id N`（v2.2.3 单集群实例不带也正常）。
 20. **v2.2.0 与 v2.2.3 的 `/v2` 面基本一致。** 实测 2.2.0 的 OpenAPI 131 个 path / 2.2.3 133 个（差 `/auth/cas/login`、`/auth/cas/callback`）；`/v2/models`、`/v2/dashboard` 的查询参数完全相同。版本差异集中在 CAS 登录，不在模型管理面。
-21. **自定义后端按 `backend_version` 拼镜像名，镜像不在目标 worker 上就 404。** 实测 v2.2.1 上用 `--backend bge-custom --backend-version bge-m3-v1.1.0` 部署，worker 报 `Failed to pull image docker.1ms.run/bge-m3:v1.1.0: not found`，实例反复 `error`（`restart_on_error` 会一直重试）。自带 vLLM/SGLang 后端不会踩；要用自定义后端先在目标 worker 上确认镜像存在。
+21. **自定义后端的镜像来自 `version_configs`，不会自动匹配公共镜像。** 解析顺序：`version_configs[backend_version].image_name` → 目标 worker 本地找不到就尝试拉取 → 拉不到则实例 `error` 并（`restart_on_error=true`）反复重试，`state_message` 带 `Failed to pull image ...`。部署前先用 `GET /v2/inference-backends/{id}` 看映射、并在目标 worker 上确认镜像；对不上就用 `--image-name` 显式覆盖。
 22. **`/v2/model-files` 的唯一键是 `(local_path, worker_id)`。** 同路径重复登记回 `409 AlreadyExists`；目标 worker 上没有该路径 → `state=error` + `Path does not exist: ...`；成功则 `state=ready` 并回填 `size`。
 
 ## 6. 端点速查

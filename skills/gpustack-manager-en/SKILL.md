@@ -1,10 +1,10 @@
 ---
 name: gpustack-manager-en
-description: "GPUStack v2.2.3 cluster operations and inference-service management: inspect clusters/workers/GPUs, deploy models (HuggingFace, ModelScope, local paths), start/stop/scale models, debug model instances via logs, put workers into maintenance, run OpenAI-compatible smoke tests, and look up REST endpoints. Load when the user mentions GPUStack, model deployment, starting/stopping models, scaling replicas, instance log troubleshooting, worker maintenance, GPU resources, inference smoke tests, or the gpustack API."
+description: "GPUStack v2.2.x cluster operations and inference-service management: inspect clusters/workers/GPUs, deploy models (HuggingFace, ModelScope, local paths), start/stop/scale models, debug model instances via logs, put workers into maintenance, run OpenAI-compatible smoke tests, and look up REST endpoints. Load when the user mentions GPUStack, model deployment, starting/stopping models, scaling replicas, instance log troubleshooting, worker maintenance, GPU resources, inference smoke tests, or the gpustack API."
 license: MIT
 metadata:
   author: iding2959
-  version: "0.1.2"
+  version: "0.1.5"
   language: en
 ---
 
